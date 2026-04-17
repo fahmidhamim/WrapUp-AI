@@ -2,6 +2,8 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { ArrowRight, Play, BarChart3, MessageSquare, FileText, Mic, Users, TrendingUp, Zap, Upload, Calendar, Clock, Shield, Globe, Headphones, User, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 40 },
@@ -11,7 +13,23 @@ const fadeUp = {
   }),
 };
 
+function useActiveUsersCount() {
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    supabase.rpc("get_active_users_count").then(({ data }) => {
+      if (typeof data === "number") setCount(data);
+    });
+  }, []);
+
+  if (count === null) return "—";
+  return count >= 1000
+    ? `${(count / 1000).toFixed(count % 1000 === 0 ? 0 : 1)}K`
+    : count.toString();
+}
+
 export default function HeroScene() {
+  const activeUsers = useActiveUsersCount();
   return (
     <section className="relative flex flex-col items-center justify-center pt-28 pb-20" style={{ minHeight: '100vh' }}>
       {/* Deep gradient overlay */}
@@ -67,7 +85,7 @@ export default function HeroScene() {
               ))}
             </div>
             <div>
-              <span className="text-lg font-bold text-foreground">35,000</span>
+              <span className="text-lg font-bold text-foreground">{activeUsers}</span>
               <p className="text-[11px] text-muted-foreground leading-tight">Users active in the last 24h</p>
             </div>
           </div>
