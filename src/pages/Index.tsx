@@ -5,6 +5,7 @@ import StarfieldBackground from "@/components/landing/StarfieldBackground";
 import TrustedBySection from "@/components/landing/TrustedBySection";
 import FeaturesSection from "@/components/landing/FeaturesSection";
 import HowItWorksSection from "@/components/landing/HowItWorksSection";
+import StatsSection from "@/components/landing/StatsSection";
 import DeviceShowcaseSection from "@/components/landing/DeviceShowcaseSection";
 import DemoSection from "@/components/landing/DemoSection";
 import ProToolsSection from "@/components/landing/ProToolsSection";
@@ -30,6 +31,7 @@ export default function LandingPage() {
       <TrustedBySection />
       <FeaturesSection />
       <HowItWorksSection />
+      <StatsSection />
       <DeviceShowcaseSection />
       <DemoSection />
       <ProToolsSection />
