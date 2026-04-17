@@ -30,8 +30,8 @@ export default function LandingPage() {
       <HeroScene />
       <TrustedBySection />
       <FeaturesSection />
-      <HowItWorksSection />
       <StatsSection />
+      <HowItWorksSection />
       <DeviceShowcaseSection />
       <DemoSection />
       <ProToolsSection />
