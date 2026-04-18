@@ -88,13 +88,13 @@ function DesktopAuthCallbackHandler() {
         const error = url.searchParams.get("error");
 
         if (error || errorDescription) {
-          throw new Error(errorDescription ?? errorCode ?? error ?? "Google sign-in could not be completed.");
+          throw new Error(errorDescription ?? errorCode ?? error ?? "OAuth sign-in could not be completed.");
         }
 
         const code = url.searchParams.get("code");
 
         if (!code) {
-          throw new Error("Google sign-in could not be completed because no auth code was returned.");
+          throw new Error("OAuth sign-in could not be completed because no auth code was returned.");
         }
 
         const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
@@ -105,7 +105,7 @@ function DesktopAuthCallbackHandler() {
 
         navigate("/dashboard", { replace: true });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Google sign-in could not be completed.");
+        toast.error(error instanceof Error ? error.message : "OAuth sign-in could not be completed.");
       }
     };
 

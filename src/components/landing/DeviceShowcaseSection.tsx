@@ -3,7 +3,7 @@ import { Monitor, Smartphone, Tablet, Play } from "lucide-react";
 import deviceDesktop from "@/assets/device-desktop.jpg";
 import deviceTablet from "@/assets/device-tablet.jpg";
 import mobileShowcase from "@/assets/mobile-showcase.jpg";
-import demoVideo from "@/assets/demo-video.mp4";
+import AnimatedDashboardTour from "@/components/landing/AnimatedDashboardTour";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 40 },
@@ -88,19 +88,11 @@ export default function DeviceShowcaseSection() {
                 <p className="text-xs text-muted-foreground">See WrapUp in action — auto walkthrough</p>
               </div>
             </div>
-            <div className="relative rounded-xl overflow-hidden bg-[hsl(240,15%,8%)] border border-white/[0.08]">
-              <video
-                src={demoVideo}
-                autoPlay
-                muted
-                loop
-                playsInline
-                className="w-full rounded-xl object-cover aspect-[16/9]"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent pointer-events-none rounded-xl" />
-              <div className="absolute bottom-3 left-3 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[10px] text-white/80 font-medium">Auto Playing</span>
+            <div className="relative">
+              <AnimatedDashboardTour />
+              <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/40 backdrop-blur-sm border border-white/[0.1] z-10">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[9px] text-white/90 font-semibold uppercase tracking-wider">Live</span>
               </div>
             </div>
           </motion.div>

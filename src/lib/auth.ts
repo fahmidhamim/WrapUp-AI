@@ -20,11 +20,11 @@ export const signIn = async (email: string, password: string) => {
   return { data, error };
 };
 
-export const signInWithGoogle = async () => {
+const signInWithOAuthProvider = async (provider: "google" | "apple") => {
   const desktopMode = isDesktopApp();
   const redirectTo = desktopMode ? DESKTOP_AUTH_CALLBACK_URL : buildPublicAppUrl("/dashboard");
   const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
+    provider,
     options: {
       redirectTo,
       ...(desktopMode ? { skipBrowserRedirect: true } : {}),
@@ -37,11 +37,37 @@ export const signInWithGoogle = async () => {
 
   if (desktopMode) {
     if (!data?.url) {
-      throw new Error("Google sign-in could not be started because no OAuth URL was returned.");
+      throw new Error(`${provider === "google" ? "Google" : "Apple"} sign-in could not be started because no OAuth URL was returned.`);
     }
 
     await openExternalUrl(data.url);
   }
+
+  return { data, error };
+};
+
+export const signInWithGoogle = async () => signInWithOAuthProvider("google");
+
+export const signInWithApple = async () => signInWithOAuthProvider("apple");
+
+export const sendPhoneOtp = async (phone: string, metadata?: { full_name?: string }) => {
+  const { data, error } = await supabase.auth.signInWithOtp({
+    phone,
+    options: {
+      channel: "sms",
+      ...(metadata ? { data: metadata } : {}),
+    },
+  });
+
+  return { data, error };
+};
+
+export const verifyPhoneOtp = async (phone: string, token: string) => {
+  const { data, error } = await supabase.auth.verifyOtp({
+    phone,
+    token,
+    type: "sms",
+  });
 
   return { data, error };
 };
@@ -62,4 +88,12 @@ export const validatePassword = (password: string): string[] => {
 
 export const validateEmail = (email: string): boolean => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+};
+
+export const normalizePhoneToE164 = (phone: string): string => {
+  return phone.trim().replace(/[\s()-]/g, "");
+};
+
+export const validatePhoneE164 = (phone: string): boolean => {
+  return /^\+[1-9]\d{6,14}$/.test(phone);
 };

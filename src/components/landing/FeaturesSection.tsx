@@ -2,7 +2,7 @@ import { Sparkles } from "lucide-react";
 
 export default function FeaturesSection() {
   return (
-    <section id="features" className="py-28 relative">
+    <section id="features" className="pt-28 pb-14 relative">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[700px] rounded-full blur-[160px] pointer-events-none" style={{ background: "hsl(250, 90%, 50%, 0.04)" }} />
 
       <div className="container mx-auto px-4 relative z-10">
