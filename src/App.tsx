@@ -56,7 +56,8 @@ function ChatbotGuard() {
     pathname.startsWith("/dashboard") ||
     pathname === "/login" ||
     pathname === "/signup" ||
-    pathname === "/pricing";
+    pathname === "/pricing" ||
+    pathname === "/about";
   if (hidden) return null;
   return <LiveChatbot />;
 }
