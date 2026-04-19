@@ -1,4 +1,7 @@
 import { useEffect } from "react";
+import Lenis from "lenis";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 import AnimatedBackground from "@/components/landing/AnimatedBackground";
 import LandingNavbar from "@/components/landing/LandingNavbar";
 import HeroScene from "@/components/landing/HeroScene";
@@ -29,8 +32,25 @@ import AmbientMusic from "@/components/landing/AmbientMusic";
 export default function LandingPage() {
   useEffect(() => {
     document.documentElement.style.scrollBehavior = "smooth";
+
+    const lenis = new Lenis({
+      duration: 1.4,
+      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+    });
+
+    const onScroll = () => ScrollTrigger.update();
+    lenis.on("scroll", onScroll);
+
+    const tickerCallback = (time: number) => lenis.raf(time * 1000);
+    gsap.ticker.add(tickerCallback);
+    gsap.ticker.lagSmoothing(0);
+
     return () => {
+      gsap.ticker.remove(tickerCallback);
+      lenis.off("scroll", onScroll);
+      lenis.destroy();
       document.documentElement.style.scrollBehavior = "";
+      document.documentElement.classList.remove("lenis", "lenis-smooth", "lenis-stopped", "lenis-scrolling");
     };
   }, []);
 
