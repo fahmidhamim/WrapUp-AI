@@ -3,12 +3,19 @@ import { buildPublicAppUrl, isDesktopApp, openExternalUrl } from "@/lib/app-shel
 
 const DESKTOP_AUTH_CALLBACK_URL = "wrapup://auth/callback";
 
+const buildWebRedirectUrl = (path: string): string => {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return new URL(path, `${window.location.origin}/`).toString();
+  }
+  return buildPublicAppUrl(path);
+};
+
 export const signUp = async (email: string, password: string, fullName: string) => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: buildPublicAppUrl("/"),
+      emailRedirectTo: buildWebRedirectUrl("/"),
       data: { full_name: fullName },
     },
   });
@@ -22,7 +29,7 @@ export const signIn = async (email: string, password: string) => {
 
 const signInWithOAuthProvider = async (provider: "google" | "apple") => {
   const desktopMode = isDesktopApp();
-  const redirectTo = desktopMode ? DESKTOP_AUTH_CALLBACK_URL : buildPublicAppUrl("/dashboard");
+  const redirectTo = desktopMode ? DESKTOP_AUTH_CALLBACK_URL : buildWebRedirectUrl("/dashboard");
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
     options: {
