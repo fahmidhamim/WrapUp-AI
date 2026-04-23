@@ -355,6 +355,29 @@ export default function MeetingDetailPage() {
         setAudioPlaybackUrl("");
         return;
       }
+      // R2-stored audio: fetch presigned URL from backend
+      if (latestAudioRef.startsWith("r2:")) {
+        const session = (sessionsQuery.data ?? []).find(
+          (s: any) => s.audio_file_url === latestAudioRef
+        );
+        if (!session) return;
+        try {
+          const { data: authData } = await supabase.auth.getSession();
+          const token = authData.session?.access_token;
+          if (!token) return;
+          const res = await fetch(`${BACKEND_URL}/sessions/${session.id}/audio-url`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (cancelled) return;
+          if (res.ok) {
+            const { url } = await res.json();
+            setAudioPlaybackUrl(url);
+          }
+        } catch {
+          // silently fail — audio player will show error state
+        }
+        return;
+      }
       const parsed = parseStorageRef(latestAudioRef);
       if (!parsed) {
         setAudioPlaybackUrl(latestAudioRef);

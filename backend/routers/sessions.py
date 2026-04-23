@@ -83,6 +83,28 @@ async def session_status(
     )
 
 
+@router.get("/{session_id}/audio-url")
+async def get_audio_url(
+    session_id: str,
+    container: ServiceContainer = Depends(get_container),
+    user: UserContext = Depends(get_current_user),
+) -> dict:
+    session = await container.db.get_session_for_user(session_id, access_token=user.access_token or "")
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    audio_file_url = session.get("audio_file_url") or ""
+    if not audio_file_url:
+        raise HTTPException(status_code=404, detail="No audio file for this session")
+    if audio_file_url.startswith("r2:"):
+        if not container.r2.is_available():
+            raise HTTPException(status_code=503, detail="R2 storage not configured")
+        key = audio_file_url[3:]
+        url = container.r2.generate_presigned_download_url(key, expires_in=3600)
+    else:
+        url = await container.db.resolve_media_url(audio_file_url, expires_in=3600)
+    return {"url": url}
+
+
 @router.post("/{session_id}/ask", response_model=AskResponse)
 async def ask_session(
     session_id: str,

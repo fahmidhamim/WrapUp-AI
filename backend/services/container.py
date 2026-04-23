@@ -12,6 +12,7 @@ from backend.rag.service import RagService
 from backend.services.chat_service import LiveChatService
 from backend.services.groq_client import GroqClient
 from backend.services.meeting_service import MeetingService
+from backend.services.r2_storage import R2StorageService
 from backend.services.session_processing import SessionProcessingService
 from backend.stripe.service import StripeService
 from backend.summarization.service import SummaryService
@@ -35,6 +36,7 @@ class ServiceContainer:
     live_chat: LiveChatService
     stripe: StripeService
     jobs: JobQueue
+    r2: R2StorageService
 
     @classmethod
     def build(cls, settings: Settings) -> "ServiceContainer":
@@ -100,6 +102,12 @@ class ServiceContainer:
                 reason="ffmpeg not available or VIDEO_AUDIO_EXTRACTION_ENABLED=false",
             )
 
+        r2 = R2StorageService(settings=settings)
+        if r2.is_available():
+            _log.info("r2_storage_enabled", bucket=settings.r2_bucket_name)
+        else:
+            _log.info("r2_storage_disabled", reason="R2 credentials not configured — audio stays in Supabase Storage")
+
         processor = SessionProcessingService(
             db=db,
             transcription_service=transcription,
@@ -109,6 +117,7 @@ class ServiceContainer:
             diarization_service=diarization,
             whisper_service=whisper,
             groq_client=groq,
+            r2_storage=r2,
         )
         meetings = MeetingService(settings=settings, groq_client=groq)
         live_chat = LiveChatService(settings, groq_client=groq)
@@ -134,4 +143,5 @@ class ServiceContainer:
             live_chat=live_chat,
             stripe=stripe,
             jobs=jobs,
+            r2=r2,
         )
