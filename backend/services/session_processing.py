@@ -291,10 +291,8 @@ class SessionProcessingService:
         # After all fallbacks, if we still have no text, raise
         if not self._has_transcript_content(transcription.transcript_text, transcription.segments):
             raise RuntimeError("Transcription returned no text. Please retry processing this session.")
-
-        # Clean up extracted audio now that transcription is done
-        if extracted_audio_path is not None:
-            self._safe_unlink(extracted_audio_path)
+        # Note: extracted_audio_path cleanup is deferred to after R2 migration so
+        # we can upload the small extracted audio instead of the full original video.
 
         # ------------------------------------------------------------------
         # Hybrid diarization: run pyannote on the audio then align with words
@@ -473,25 +471,50 @@ class SessionProcessingService:
 
         await progress_callback(100, "Session processing completed")
 
-        # Migrate audio from Supabase Storage → Cloudflare R2 to free up
-        # Supabase storage quota. Only runs when R2 is configured.
+        # Migrate audio to B2/R2 then clean up extracted audio temp file.
         if self.r2_storage and self.r2_storage.is_available() and not audio_file_url.startswith("r2:"):
-            await self._migrate_audio_to_r2(session_id=session_id, audio_file_url=audio_file_url)
+            await self._migrate_audio_to_r2(
+                session_id=session_id,
+                audio_file_url=audio_file_url,
+                extracted_audio_path=extracted_audio_path,
+            )
+        elif extracted_audio_path is not None:
+            self._safe_unlink(extracted_audio_path)
 
-    async def _migrate_audio_to_r2(self, *, session_id: str, audio_file_url: str) -> None:
-        """Download audio from Supabase Storage, upload to R2, update session, delete from Supabase."""
+    async def _migrate_audio_to_r2(
+        self,
+        *,
+        session_id: str,
+        audio_file_url: str,
+        extracted_audio_path: Path | None = None,
+    ) -> None:
+        """Upload audio to B2/R2, update session, delete original from Supabase.
+
+        For video uploads: uses the small extracted audio file (opus/ogg) instead
+        of the original video, saving significant B2 storage space.
+        """
         try:
             import mimetypes as _mimetypes
-            audio_bytes = await self.db.download_audio(audio_file_url)
-            ext = audio_file_url.rsplit(".", 1)[-1].lower() if "." in audio_file_url else "bin"
-            content_type = _mimetypes.guess_type(f"file.{ext}")[0] or "audio/mpeg"
+            if extracted_audio_path is not None and extracted_audio_path.exists():
+                # Video case: upload the small extracted audio, not the original video
+                audio_bytes = extracted_audio_path.read_bytes()
+                ext = extracted_audio_path.suffix.lstrip(".") or "ogg"
+                content_type = _mimetypes.guess_type(str(extracted_audio_path))[0] or "audio/ogg"
+            else:
+                # Audio case: download original from Supabase
+                audio_bytes = await self.db.download_audio(audio_file_url)
+                ext = audio_file_url.rsplit(".", 1)[-1].lower() if "." in audio_file_url else "mp3"
+                content_type = _mimetypes.guess_type(f"file.{ext}")[0] or "audio/mpeg"
             r2_key = f"audio/{session_id}.{ext}"
             self.r2_storage.upload_bytes(r2_key, audio_bytes, content_type=content_type)
             await self.db.update_session(session_id, {"audio_file_url": f"r2:{r2_key}"})
             await self.db.delete_storage_object(audio_file_url)
-            logger.info("audio_migrated_to_r2", session_id=session_id, r2_key=r2_key)
+            logger.info("audio_migrated_to_r2", session_id=session_id, r2_key=r2_key, size_mb=round(len(audio_bytes) / 1_048_576, 1))
         except Exception as exc:
             logger.warning("audio_migration_to_r2_failed", session_id=session_id, error=str(exc))
+        finally:
+            if extracted_audio_path is not None:
+                self._safe_unlink(extracted_audio_path)
 
     @staticmethod
     def _deepgram_word_confidence(result: TranscriptionResult) -> float:
