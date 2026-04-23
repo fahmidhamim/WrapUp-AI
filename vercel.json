@@ -4,6 +4,7 @@
   "installCommand": "npm install",
   "framework": "vite",
   "rewrites": [
+    { "source": "/api/backend/:path*", "destination": "http://92.4.79.17:8000/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
