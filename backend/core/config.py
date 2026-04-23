@@ -124,6 +124,19 @@ class Settings(BaseSettings):
     # Target audio bitrate for extraction.
     video_audio_bitrate: str = "64k"
 
+    # ------------------------------------------------------------------
+    # S3-compatible object storage (Cloudflare R2 or Backblaze B2)
+    # ------------------------------------------------------------------
+    r2_account_id: str | None = None  # R2 only — not needed for B2
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+    r2_bucket_name: str | None = None
+    # Explicit endpoint URL — required for B2, auto-constructed for R2.
+    # B2 example: https://s3.us-east-005.backblazeb2.com
+    r2_endpoint_url: str | None = None
+    # Optional public custom domain for download URLs.
+    r2_public_domain: str | None = None
+
     data_dir: Path = Field(default=Path("backend/data"))
     faiss_dir_name: str = "faiss"
     summary_temperature: float = 0.2

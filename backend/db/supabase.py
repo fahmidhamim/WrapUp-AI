@@ -170,6 +170,9 @@ class SupabaseClient:
         return await self.fetch_one("sessions", filters={"id": session_id}, access_token=access_token)
 
     async def resolve_media_url(self, audio_file_url: str, expires_in: int = 3600) -> str:
+        if audio_file_url.startswith("r2:"):
+            raise ValueError("R2 audio refs must be resolved by R2StorageService, not SupabaseClient")
+
         if audio_file_url.startswith("http://") or audio_file_url.startswith("https://"):
             signed_url = await self._try_convert_storage_public_url_to_signed_url(audio_file_url)
             return signed_url or audio_file_url
@@ -178,6 +181,31 @@ class SupabaseClient:
             raise ValueError("audio_file_url must be a full URL or 'bucket/path' format")
         bucket, path = audio_file_url.split("/", 1)
         return await self.create_signed_object_url(bucket=bucket, path=path, expires_in=expires_in)
+
+    async def delete_storage_object(self, audio_file_url: str) -> None:
+        """Delete an object from Supabase Storage given a 'bucket/path' ref or full URL."""
+        try:
+            if audio_file_url.startswith("http://") or audio_file_url.startswith("https://"):
+                parsed_path = urlparse(audio_file_url).path or ""
+                marker = "/storage/v1/object/public/"
+                if marker not in parsed_path:
+                    return
+                suffix = parsed_path.split(marker, 1)[1]
+                if "/" not in suffix:
+                    return
+                bucket, path = suffix.split("/", 1)
+            elif "/" in audio_file_url:
+                bucket, path = audio_file_url.split("/", 1)
+            else:
+                return
+            encoded_path = quote(path, safe="/")
+            response = await self._request(
+                "DELETE",
+                f"/storage/v1/object/{bucket}/{encoded_path}",
+            )
+            logger.info("supabase_storage_deleted", bucket=bucket, path=path, status=response.status_code)
+        except Exception as exc:
+            logger.warning("supabase_storage_delete_failed", audio_file_url=audio_file_url, error=str(exc))
 
     async def download_audio(self, audio_file_url: str) -> bytes:
         signed_url = await self.resolve_media_url(audio_file_url, expires_in=3600)

@@ -23,6 +23,7 @@ from backend.language import (
 from backend.models.domain import TranscriptSegment, TranscriptionResult
 from backend.rag.service import RagService
 from backend.services.groq_client import GroqClient
+from backend.services.r2_storage import R2StorageService
 from backend.summarization.service import SummaryService
 from backend.transcription.audio_utils import (
     chunk_audio,
@@ -63,6 +64,7 @@ class SessionProcessingService:
     diarization_service: PyannoteDiarizationService | None = field(default=None)
     whisper_service: WhisperTranscriptionService | None = field(default=None)
     groq_client: GroqClient | None = field(default=None)
+    r2_storage: R2StorageService | None = field(default=None)
 
     async def process_session(
         self,
@@ -470,6 +472,26 @@ class SessionProcessingService:
         await self.db.update_session(session_id, {"analytics_data": analytics})
 
         await progress_callback(100, "Session processing completed")
+
+        # Migrate audio from Supabase Storage → Cloudflare R2 to free up
+        # Supabase storage quota. Only runs when R2 is configured.
+        if self.r2_storage and self.r2_storage.is_available() and not audio_file_url.startswith("r2:"):
+            await self._migrate_audio_to_r2(session_id=session_id, audio_file_url=audio_file_url)
+
+    async def _migrate_audio_to_r2(self, *, session_id: str, audio_file_url: str) -> None:
+        """Download audio from Supabase Storage, upload to R2, update session, delete from Supabase."""
+        try:
+            import mimetypes as _mimetypes
+            audio_bytes = await self.db.download_audio(audio_file_url)
+            ext = audio_file_url.rsplit(".", 1)[-1].lower() if "." in audio_file_url else "bin"
+            content_type = _mimetypes.guess_type(f"file.{ext}")[0] or "audio/mpeg"
+            r2_key = f"audio/{session_id}.{ext}"
+            self.r2_storage.upload_bytes(r2_key, audio_bytes, content_type=content_type)
+            await self.db.update_session(session_id, {"audio_file_url": f"r2:{r2_key}"})
+            await self.db.delete_storage_object(audio_file_url)
+            logger.info("audio_migrated_to_r2", session_id=session_id, r2_key=r2_key)
+        except Exception as exc:
+            logger.warning("audio_migration_to_r2_failed", session_id=session_id, error=str(exc))
 
     @staticmethod
     def _deepgram_word_confidence(result: TranscriptionResult) -> float:
