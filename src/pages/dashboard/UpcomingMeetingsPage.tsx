@@ -63,7 +63,6 @@ export default function UpcomingMeetingsPage() {
                     </span>
                   </div>
                   <h3 className="font-semibold text-sm mb-2">{m.title}</h3>
-                  <p className="text-[10px] text-muted-foreground font-mono mb-2">ID: {m.id.slice(0, 8)}</p>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <Calendar className="h-3 w-3" />

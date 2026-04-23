@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8002";
@@ -10,6 +11,11 @@ const HEALTH_POLL_INTERVAL_MS = 1000;
 const HEALTH_REQUEST_TIMEOUT_MS = 2000;
 const BACKEND_START_TIMEOUT_MS = 60000;
 const MANAGED_REQUIREMENTS_HASH_FILE = ".requirements.sha1";
+const SIGTERM_GRACE_MS = 3000;
+const MAX_STARTUP_ATTEMPTS = 5;
+const STARTUP_RETRY_DELAY_MS = 2000;
+const HEALTH_FAILURE_THRESHOLD = 3;
+const HEALTH_PROBE_TIMEOUT_MS = 4000;
 
 export type BackendRuntimeState = "starting" | "ready" | "unavailable";
 export type BackendRuntimeSource = "owned" | "external" | "none";
@@ -77,6 +83,9 @@ export class BackendManager {
   private backendStartupEpoch = 0;
   private shutdownPromise: Promise<void> | null = null;
   private lastLogs: string[] = [];
+  private backendLogStream: WriteStream | null = null;
+  private backendLogStreamFailed = false;
+  private consecutiveHealthFailures = 0;
 
   constructor(options: BackendManagerOptions) {
     this.options = options;
@@ -109,16 +118,23 @@ export class BackendManager {
     });
 
     if (this.status.state === "ready") {
-      const healthy = await this.isBackendHealthy(config.healthUrl);
+      const healthy = await this.isBackendHealthy(config.healthUrl, HEALTH_PROBE_TIMEOUT_MS);
 
-      if (!healthy) {
-        this.patchStatus({
-          state: this.ownedBackendProcess ? "starting" : "unavailable",
-          source: this.ownedBackendProcess ? "owned" : "none",
-          message: this.ownedBackendProcess
-            ? "Local backend is starting..."
-            : "Local backend is unavailable.",
-        });
+      if (healthy) {
+        this.consecutiveHealthFailures = 0;
+      } else {
+        this.consecutiveHealthFailures += 1;
+
+        if (this.consecutiveHealthFailures >= HEALTH_FAILURE_THRESHOLD) {
+          this.patchStatus({
+            state: this.ownedBackendProcess ? "starting" : "unavailable",
+            source: this.ownedBackendProcess ? "owned" : "none",
+            message: this.ownedBackendProcess
+              ? "Local backend is starting..."
+              : "Local backend is unavailable.",
+          });
+          this.consecutiveHealthFailures = 0;
+        }
       }
     }
 
@@ -133,6 +149,8 @@ export class BackendManager {
     if (this.shutdownPromise) {
       return this.shutdownPromise;
     }
+
+    this.consecutiveHealthFailures = 0;
 
     const activeProcess = this.ownedBackendProcess;
 
@@ -151,6 +169,7 @@ export class BackendManager {
         message: "Local backend stopped.",
         command: null,
       });
+      this.closeBackendLogStream();
       this.shutdownPromise = null;
     });
 
@@ -182,6 +201,7 @@ export class BackendManager {
           ? "Local backend is ready."
           : "Local backend is already running.",
       });
+      this.consecutiveHealthFailures = 0;
       return this.cloneStatus();
     }
 
@@ -194,6 +214,7 @@ export class BackendManager {
         healthUrl: config.healthUrl,
         message: "Local backend is ready.",
       });
+      this.consecutiveHealthFailures = 0;
       return this.cloneStatus();
     }
 
@@ -217,47 +238,76 @@ export class BackendManager {
       message: "Starting local backend...",
     });
 
-    const child = spawn(command.file, command.args, {
-      cwd: this.options.projectRoot,
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: "utf-8",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
+    let lastError: unknown = null;
 
-    this.ownedBackendProcess = child;
-    this.attachProcessLogging(child);
-    this.attachProcessLifecycle(child, startupEpoch);
-
-    try {
-      await this.waitForHealth(config.healthUrl, child);
-      this.patchStatus({
-        state: "ready",
-        source: "owned",
-        backendUrl: config.backendUrl,
-        healthUrl: config.healthUrl,
-        command: command.command,
-        message: "Local backend is ready.",
-      });
-    } catch (error) {
-      if (this.ownedBackendProcess?.pid === child.pid) {
-        await this.stopProcess(child);
-        this.ownedBackendProcess = null;
+    for (let attempt = 1; attempt <= MAX_STARTUP_ATTEMPTS; attempt++) {
+      if (startupEpoch !== this.backendStartupEpoch) {
+        return this.cloneStatus();
       }
 
-      const message = error instanceof Error ? error.message : "Local backend failed to start.";
-
-      this.patchStatus({
-        state: "unavailable",
-        source: "none",
-        backendUrl: config.backendUrl,
-        healthUrl: config.healthUrl,
-        command: command.command,
-        message,
+      const child = spawn(command.file, command.args, {
+        cwd: this.options.projectRoot,
+        env: {
+          ...process.env,
+          PYTHONIOENCODING: "utf-8",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
+
+      this.ownedBackendProcess = child;
+      this.attachProcessLogging(child);
+      this.attachProcessLifecycle(child, startupEpoch);
+
+      try {
+        await this.waitForHealth(config.healthUrl, child);
+        this.patchStatus({
+          state: "ready",
+          source: "owned",
+          backendUrl: config.backendUrl,
+          healthUrl: config.healthUrl,
+          command: command.command,
+          message: "Local backend is ready.",
+        });
+        this.consecutiveHealthFailures = 0;
+        return this.cloneStatus();
+      } catch (error) {
+        lastError = error;
+
+        if (this.ownedBackendProcess?.pid === child.pid) {
+          await this.stopProcess(child);
+          this.ownedBackendProcess = null;
+        }
+
+        if (startupEpoch !== this.backendStartupEpoch) {
+          return this.cloneStatus();
+        }
+
+        if (attempt < MAX_STARTUP_ATTEMPTS) {
+          this.patchStatus({
+            state: "starting",
+            source: "owned",
+            backendUrl: config.backendUrl,
+            healthUrl: config.healthUrl,
+            command: command.command,
+            message: `Restarting local backend (attempt ${attempt + 1}/${MAX_STARTUP_ATTEMPTS})…`,
+          });
+          await sleep(STARTUP_RETRY_DELAY_MS);
+        }
+      }
     }
+
+    const message = lastError instanceof Error ? lastError.message : "Local backend failed to start.";
+
+    this.patchStatus({
+      state: "unavailable",
+      source: "none",
+      backendUrl: config.backendUrl,
+      healthUrl: config.healthUrl,
+      command: command.command,
+      message,
+    });
+    this.closeBackendLogStream();
 
     return this.cloneStatus();
   }
@@ -335,7 +385,11 @@ export class BackendManager {
         return;
       }
 
-      if (this.status.state === "ready" || this.status.state === "starting") {
+      const applyUnavailable = () => {
+        if (startupEpoch !== this.backendStartupEpoch) return;
+        if (this.ownedBackendProcess) return;
+        if (this.status.state !== "ready" && this.status.state !== "starting") return;
+
         const terminationReason =
           signal
             ? `signal ${signal}`
@@ -347,6 +401,14 @@ export class BackendManager {
           source: "none",
           message: `Local backend exited with ${terminationReason}.`,
         });
+      };
+
+      // A SIGTERM may be a graceful restart; give the supervisor a window
+      // to spawn a replacement child before we flip the UI to offline.
+      if (signal === "SIGTERM") {
+        setTimeout(applyUnavailable, SIGTERM_GRACE_MS);
+      } else {
+        applyUnavailable();
       }
     });
   }
@@ -354,6 +416,8 @@ export class BackendManager {
   private captureLogChunk(stream: "stdout" | "stderr", chunk: Buffer | string) {
     const text = chunk.toString();
     const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+    const logStream = stream === "stderr" ? this.ensureBackendLogStream() : null;
 
     for (const line of lines) {
       const taggedLine = `[backend:${stream}] ${line}`;
@@ -368,13 +432,58 @@ export class BackendManager {
       } else {
         console.log(taggedLine);
       }
+
+      if (logStream) {
+        try {
+          logStream.write(`[${new Date().toISOString()}] ${line}\n`);
+        } catch {
+          // Stream is already failing; the "error" listener below will null it out.
+        }
+      }
     }
   }
 
-  private async isBackendHealthy(healthUrl: string) {
+  private ensureBackendLogStream(): WriteStream | null {
+    if (process.platform !== "darwin") return null;
+    if (this.backendLogStreamFailed) return null;
+    if (this.backendLogStream) return this.backendLogStream;
+
+    try {
+      const logDir = join(homedir(), "Library", "Logs", "WrapUp");
+      mkdirSync(logDir, { recursive: true });
+      const stream = createWriteStream(join(logDir, "backend.log"), { flags: "a" });
+      stream.on("error", () => {
+        this.backendLogStreamFailed = true;
+        this.backendLogStream = null;
+      });
+      this.backendLogStream = stream;
+      return stream;
+    } catch {
+      this.backendLogStreamFailed = true;
+      this.backendLogStream = null;
+      return null;
+    }
+  }
+
+  private closeBackendLogStream() {
+    const stream = this.backendLogStream;
+    this.backendLogStream = null;
+    if (stream) {
+      try {
+        stream.end();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private async isBackendHealthy(
+    healthUrl: string,
+    timeoutMs: number = HEALTH_REQUEST_TIMEOUT_MS,
+  ) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), HEALTH_REQUEST_TIMEOUT_MS);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const response = await fetch(healthUrl, {

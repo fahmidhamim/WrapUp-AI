@@ -103,6 +103,7 @@ export type Database = {
           owner_id: string
           scheduled_at: string | null
           scheduled_end_at: string | null
+          source: string | null
           title: string
           updated_at: string
         }
@@ -115,6 +116,7 @@ export type Database = {
           owner_id: string
           scheduled_at?: string | null
           scheduled_end_at?: string | null
+          source?: string | null
           title?: string
           updated_at?: string
         }
@@ -127,6 +129,7 @@ export type Database = {
           owner_id?: string
           scheduled_at?: string | null
           scheduled_end_at?: string | null
+          source?: string | null
           title?: string
           updated_at?: string
         }
@@ -267,29 +270,35 @@ export type Database = {
       }
       sessions: {
         Row: {
+          analytics_data: Json | null
           audio_file_url: string | null
           created_at: string
           id: string
           language_detected: string | null
           meeting_id: string
+          processing_status: string | null
           summary: Json | null
           transcript: string | null
         }
         Insert: {
+          analytics_data?: Json | null
           audio_file_url?: string | null
           created_at?: string
           id?: string
           language_detected?: string | null
           meeting_id: string
+          processing_status?: string | null
           summary?: Json | null
           transcript?: string | null
         }
         Update: {
+          analytics_data?: Json | null
           audio_file_url?: string | null
           created_at?: string
           id?: string
           language_detected?: string | null
           meeting_id?: string
+          processing_status?: string | null
           summary?: Json | null
           transcript?: string | null
         }

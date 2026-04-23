@@ -74,7 +74,7 @@ export default function UploadPage() {
       let targetMeetingId = meetingId;
 
       if (!targetMeetingId || targetMeetingId === "new") {
-        const meeting = await createMeeting.mutateAsync(file.name.replace(/\.[^.]+$/, ""));
+        const meeting = await createMeeting.mutateAsync({ title: file.name.replace(/\.[^.]+$/, ""), source: "uploaded" });
         targetMeetingId = meeting.id;
       }
 

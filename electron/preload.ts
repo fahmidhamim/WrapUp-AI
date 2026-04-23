@@ -5,6 +5,7 @@ type DesktopCaptureStatus = "idle" | "starting" | "recording" | "stopping" | "er
 interface DesktopCaptureOptions {
   captureMicrophone: boolean;
   captureSystemAudio: boolean;
+  language?: string;
 }
 
 interface DesktopCaptureState {
@@ -23,6 +24,7 @@ interface CaptureSpoolSessionMetadata {
   mimeType: string | null;
   size: number;
   spooled: boolean;
+  language?: string | null;
 }
 
 interface DesktopCaptureStopResult {
@@ -41,6 +43,7 @@ interface FinalizedCaptureSpoolItem {
   spoolPath: string | null;
   mimeType: string | null;
   size: number;
+  language?: string | null;
   createdAt: string;
   finalizedAt: string;
   status: "finalized";
@@ -79,6 +82,9 @@ interface ForegroundUploadAuthContext {
 }
 
 interface ForegroundUploadCredentials extends ForegroundUploadAuthContext {
+  language?: string;
+  meetingTitle?: string;
+  source?: string;
 }
 
 interface RunNextForegroundUploadResult {
@@ -94,6 +100,12 @@ interface RunNextForegroundUploadResult {
   reusedUploadPath: string | null;
   meetingId: string | null;
   sessionId: string | null;
+}
+
+interface RunNextForegroundUploadOptions {
+  language?: string;
+  meetingTitle?: string;
+  source?: string;
 }
 
 interface BackendRuntimeStatus {
@@ -391,6 +403,23 @@ async function failCapture(message: string) {
   }
 }
 
+function setMicMuted(muted: boolean): { applied: boolean; muted: boolean } {
+  if (!micStream) {
+    return { applied: false, muted };
+  }
+
+  const audioTracks = micStream.getAudioTracks();
+  if (audioTracks.length === 0) {
+    return { applied: false, muted };
+  }
+
+  for (const track of audioTracks) {
+    track.enabled = !muted;
+  }
+
+  return { applied: true, muted };
+}
+
 async function startCapture(options: DesktopCaptureOptions): Promise<DesktopCaptureState> {
   if (captureState.status === "starting" || captureState.status === "recording") {
     throw new Error("Capture is already in progress.");
@@ -424,9 +453,9 @@ async function startCapture(options: DesktopCaptureOptions): Promise<DesktopCapt
     if (options.captureMicrophone) {
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
         },
       });
     }
@@ -489,6 +518,7 @@ async function startCapture(options: DesktopCaptureOptions): Promise<DesktopCapt
 
     activeSpoolSession = await ipcRenderer.invoke("electron:create-capture-spool-session", {
       mimeType: recorder.mimeType || "audio/webm",
+      language: options.language,
     }) as CaptureSpoolSessionMetadata;
     appendQueue = Promise.resolve();
     appendError = null;
@@ -642,13 +672,14 @@ contextBridge.exposeInMainWorld("electronApp", {
     ipcRenderer.invoke("electron:retry-backend-startup") as Promise<BackendRuntimeStatus>,
   startCapture: (options: DesktopCaptureOptions) => startCapture(options),
   stopCapture: () => stopCapture(),
+  setCaptureMicMuted: (muted: boolean) => setMicMuted(muted),
   listFinalizedCaptureSpools: () =>
     ipcRenderer.invoke("electron:list-finalized-capture-spools") as Promise<FinalizedCaptureSpoolItem[]>,
   listUploadQueueItems: () =>
     ipcRenderer.invoke("electron:list-upload-queue-items") as Promise<FinalizedCaptureSpoolItem[]>,
   claimNextUploadQueueItem: () =>
     ipcRenderer.invoke("electron:claim-next-upload-queue-item") as Promise<FinalizedCaptureSpoolItem | null>,
-  runNextForegroundUpload: async () => {
+  runNextForegroundUpload: async (options?: RunNextForegroundUploadOptions) => {
     const authContext = getCurrentSupabaseAuthContext();
 
     if (!authContext) {
@@ -670,7 +701,12 @@ contextBridge.exposeInMainWorld("electronApp", {
 
     return ipcRenderer.invoke(
       "electron:run-next-foreground-upload",
-      authContext satisfies ForegroundUploadCredentials,
+      {
+        ...authContext,
+        language: options?.language,
+        meetingTitle: options?.meetingTitle,
+        source: options?.source,
+      } satisfies ForegroundUploadCredentials,
     ) as Promise<RunNextForegroundUploadResult>;
   },
   markUploadQueueItemUploaded: (payload: { id: string; deleteTempFile?: boolean }) =>

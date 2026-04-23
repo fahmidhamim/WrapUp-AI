@@ -17,8 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { jsPDF } from "jspdf";
 import { buildPublicAppUrl, getPublicAppBaseUrl, hasConfiguredPublicAppUrl, openExternalUrl } from "@/lib/app-shell";
+import { generateMeetingPdf } from "@/lib/meeting-pdf";
 import { startSessionProcessing } from "@/lib/session-processing";
 
 type DiarizedSegment = {
@@ -582,111 +582,14 @@ export default function MeetingDetailPage() {
 
   const handleGeneratePdf = async () => {
     try {
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 40;
-      const usableWidth = pageWidth - margin * 2;
-      let y = 52;
-
-      const addLines = (text: string, size = 11, bold = false) => {
-        if (!text.trim()) return;
-        doc.setFont("helvetica", bold ? "bold" : "normal");
-        doc.setFontSize(size);
-        const lines = doc.splitTextToSize(text, usableWidth) as string[];
-        for (const line of lines) {
-          if (y > pageHeight - 45) {
-            doc.addPage();
-            y = 52;
-          }
-          doc.text(line, margin, y);
-          y += size + 4;
-        }
-      };
-
-      const toTextList = (value?: string[] | string): string[] => {
-        if (Array.isArray(value)) {
-          return value.map((item) => item.trim()).filter(Boolean);
-        }
-        if (typeof value !== "string") return [];
-        return value
-          .split(/\s*\|\s*|\n+/)
-          .map((item) => item.trim())
-          .filter(Boolean);
-      };
-
-      const addBulletList = (title: string, items: string[]) => {
-        if (items.length === 0) return;
-        y += 6;
-        addLines(title, 12, true);
-        items.forEach((item) => addLines(`- ${item}`, 11));
-      };
-
-      addLines(meeting.title, 18, true);
-      addLines(`Meeting ID: ${meeting.id}`, 10);
-      addLines(`Date: ${new Date(meeting.created_at).toLocaleString()}`, 10);
-      y += 8;
-      addLines("Transcript", 14, true);
-      addLines(transcriptDraft || "No transcript generated yet.", 10);
-
-      y += 8;
-      addLines("Summary", 14, true);
-      addLines(summaryDraft.executive_summary ?? "No summary generated yet.", 11);
-
-      addBulletList("Key Points", toTextList(summaryDraft.key_points));
-      addBulletList("Decisions", toTextList(summaryDraft.decisions));
-      addBulletList("Follow-ups", toTextList(summaryDraft.follow_ups));
-
-      if (Array.isArray(summaryDraft.action_items) && summaryDraft.action_items.length > 0) {
-        y += 6;
-        addLines("Generated Action Items", 12, true);
-        summaryDraft.action_items.forEach((item) => {
-          const task = item.task?.trim() || "Untitled task";
-          const owner = item.owner?.trim() ? ` | Owner: ${item.owner.trim()}` : "";
-          const deadline = item.deadline?.trim() ? ` | Deadline: ${item.deadline.trim()}` : "";
-          addLines(`- ${task}${owner}${deadline}`, 11);
-        });
-      }
-
-      if (Array.isArray(summaryDraft.speaker_breakdown) && summaryDraft.speaker_breakdown.length > 0) {
-        y += 6;
-        addLines("Speaker Breakdown", 12, true);
-        summaryDraft.speaker_breakdown.forEach((entry) => {
-          const speaker = entry.speaker?.trim() || "Unknown";
-          const contribution = entry.contribution?.trim() || "";
-          addLines(`- ${speaker}${contribution ? `: ${contribution}` : ""}`, 11);
-        });
-      }
-
-      if (summaryDraft.mom && Object.keys(summaryDraft.mom).length > 0) {
-        y += 6;
-        addLines("Structured MoM", 12, true);
-        if (summaryDraft.mom.title?.trim()) addLines(summaryDraft.mom.title.trim(), 11, true);
-        if (summaryDraft.mom.overview?.trim()) addLines(summaryDraft.mom.overview.trim(), 11);
-
-        const momAgenda = toTextList(summaryDraft.mom.agenda);
-        if (momAgenda.length > 0) addLines(`Agenda: ${momAgenda.join(" | ")}`, 11);
-
-        const momDiscussion = toTextList(summaryDraft.mom.discussion);
-        if (momDiscussion.length > 0) addLines(`Discussion: ${momDiscussion.join(" | ")}`, 11);
-
-        const momDecisions = toTextList(summaryDraft.mom.decisions);
-        if (momDecisions.length > 0) addLines(`Decisions: ${momDecisions.join(" | ")}`, 11);
-
-        const momActionItems = toTextList(summaryDraft.mom.action_items);
-        if (momActionItems.length > 0) addLines(`Action Items: ${momActionItems.join(" | ")}`, 11);
-
-        const momNextSteps = toTextList(summaryDraft.mom.next_steps);
-        if (momNextSteps.length > 0) addLines(`Next Steps: ${momNextSteps.join(" | ")}`, 11);
-      }
-
-      if (meetingActions.length > 0) {
-        y += 6;
-        addLines("Action Items", 12, true);
-        meetingActions.forEach((item) => addLines(`- ${item.is_completed ? "[Done] " : ""}${item.title}`, 11));
-      }
-
-      doc.save(`${meeting.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "meeting"}-summary.pdf`);
+      generateMeetingPdf({
+        title: meeting.title,
+        id: meeting.id,
+        createdAt: meeting.created_at,
+        transcript: transcriptDraft,
+        summary: summaryDraft,
+        meetingActions: meetingActions.map((a) => ({ title: a.title, is_completed: a.is_completed })),
+      });
       toast.success("PDF generated.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to generate PDF"));
@@ -903,8 +806,8 @@ export default function MeetingDetailPage() {
         </Button>
         <div>
           <h1 className="text-xl font-bold">{meeting.title}</h1>
-          <p className="text-xs text-muted-foreground font-mono">
-            ID: {meeting.id.slice(0, 8)} · {new Date(meeting.created_at).toLocaleDateString()}
+          <p className="text-xs text-muted-foreground">
+            {new Date(meeting.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
           </p>
           {meeting.scheduled_at && (
             <p className="text-xs text-primary mt-1">

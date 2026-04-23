@@ -7,9 +7,16 @@ import { signOut } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/common/NavLink";
 import {
-  LayoutDashboard, Video, Upload, Radio, PhoneCall, BarChart3,
-  Calendar, Settings, User, LogOut, Plus, Moon, Sun, Menu, Clock,
+  LayoutDashboard, Video, PhoneCall, BarChart3,
+  Calendar, Settings, LogOut, Plus, Moon, Sun, Menu, Clock, Bell,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isTierAtLeast, type SubscriptionTier } from "@/lib/subscription";
@@ -17,24 +24,47 @@ import { isTierAtLeast, type SubscriptionTier } from "@/lib/subscription";
 const sidebarLinks = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { label: "Meetings", to: "/dashboard/meetings", icon: Video },
-  { label: "Upload", to: "/dashboard/upload", icon: Upload },
-  { label: "Instant Meeting", to: "/dashboard/instant", icon: Radio },
+  { label: "New Meeting", to: "/dashboard/new-meeting", icon: Plus },
   { label: "Schedule", to: "/dashboard/schedule", icon: Calendar },
   { label: "Upcoming Meetings", to: "/dashboard/upcoming", icon: Clock },
   { label: "Join Meeting", to: "/dashboard/join", icon: PhoneCall },
   { label: "Analytics", to: "/dashboard/analytics", icon: BarChart3, minimumTier: "business" as SubscriptionTier },
   { label: "Calendar", to: "/dashboard/calendar", icon: Calendar, minimumTier: "business" as SubscriptionTier },
   { label: "Settings", to: "/dashboard/settings", icon: Settings },
-  
 ];
+
+const PAGE_TITLES: Array<{ match: (p: string) => boolean; title: string }> = [
+  { match: (p) => p.startsWith("/dashboard/meetings"), title: "Meetings" },
+  { match: (p) => p.startsWith("/dashboard/upload"), title: "Upload Recording" },
+  { match: (p) => p.startsWith("/dashboard/instant"), title: "Instant Meeting" },
+  { match: (p) => p.startsWith("/dashboard/new-meeting"), title: "New Meeting" },
+  { match: (p) => p.startsWith("/dashboard/schedule"), title: "Schedule" },
+  { match: (p) => p.startsWith("/dashboard/upcoming"), title: "Upcoming Meetings" },
+  { match: (p) => p.startsWith("/dashboard/join"), title: "Join Meeting" },
+  { match: (p) => p.startsWith("/dashboard/analytics"), title: "Analytics" },
+  { match: (p) => p.startsWith("/dashboard/calendar"), title: "Calendar" },
+  { match: (p) => p.startsWith("/dashboard/settings"), title: "Settings" },
+  { match: (p) => p.startsWith("/dashboard/profile"), title: "Profile" },
+];
+
+function getPageTitle(pathname: string): string {
+  for (const entry of PAGE_TITLES) {
+    if (entry.match(pathname)) return entry.title;
+  }
+  return "Dashboard";
+}
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const { data: profile } = useProfile();
   const { tier } = useSubscription();
   const navigate = useNavigate();
+  const location = useLocation();
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const pageTitle = getPageTitle(location.pathname);
+  const isDashboardHome = location.pathname === "/dashboard";
+  const showNewMeetingBtn = location.pathname === "/dashboard";
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
@@ -131,24 +161,49 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <Menu className="h-5 w-5" />
             </button>
             <div>
-              <p className="text-2xl font-bold leading-tight">Dashboard</p>
-              <p className="text-base text-muted-foreground mt-0.5">
-                {tier === "enterprise" ? "Enterprise command center" : tier === "business" ? "Business workspace" : tier === "plus" ? "Plus workspace" : "Free workspace"} for{" "}
-                {profile?.full_name || user.email?.split("@")[0] || "there"} 👋
-              </p>
+              <p className="text-2xl font-bold leading-tight">{pageTitle}</p>
+              {isDashboardHome && (
+                <p className="text-base text-muted-foreground mt-0.5">
+                  {tier === "enterprise" ? "Enterprise command center" : tier === "business" ? "Business workspace" : tier === "plus" ? "Plus workspace" : "Free workspace"} for{" "}
+                  {profile?.full_name || user.email?.split("@")[0] || "there"} 👋
+                </p>
+              )}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative">
+                  <Bell className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <div className="px-3 py-2 border-b border-border/40">
+                  <p className="text-sm font-semibold">Notifications</p>
+                </div>
+                <div className="px-3 py-6 text-center">
+                  <Bell className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+                  <p className="text-sm text-muted-foreground">You're all caught up!</p>
+                  <p className="text-xs text-muted-foreground/60 mt-0.5">No new notifications</p>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate("/dashboard/settings")}>
+                  <Settings className="mr-2 h-4 w-4" /> Notification settings
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="ghost" size="icon"
               onClick={() => setDark(!dark)}
             >
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
-            <Button size="sm" className="gradient-bg text-primary-foreground font-semibold" onClick={() => navigate("/dashboard/meetings?new=true")}>
-              <Plus className="h-4 w-4 mr-1" /> New Meeting
-            </Button>
+            {showNewMeetingBtn && (
+              <Button size="sm" className="gradient-bg text-primary-foreground font-semibold" onClick={() => navigate("/dashboard/new-meeting")}>
+                <Plus className="h-4 w-4 mr-1" /> New Meeting
+              </Button>
+            )}
           </div>
         </header>
 
@@ -156,6 +211,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+
     </div>
   );
 }

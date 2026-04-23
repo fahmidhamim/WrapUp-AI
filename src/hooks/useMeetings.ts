@@ -9,6 +9,20 @@ type MeetingUpdate = Pick<
   "title" | "scheduled_at" | "scheduled_end_at" | "actual_ended_at" | "duration_minutes"
 >;
 type MeetingInsert = Database["public"]["Tables"]["meetings"]["Insert"];
+type MeetingRow = Database["public"]["Tables"]["meetings"]["Row"];
+type SessionRow = Database["public"]["Tables"]["sessions"]["Row"];
+
+export type MeetingSessionSummary = Pick<
+  SessionRow,
+  "id" | "transcript" | "summary" | "language_detected" | "created_at"
+> & {
+  processing_status?: string | null;
+  analytics_data?: Record<string, unknown> | null;
+};
+
+export type MeetingWithSessions = MeetingRow & {
+  sessions: MeetingSessionSummary[];
+};
 
 export function useMeetings() {
   const { user } = useAuth();
@@ -19,11 +33,11 @@ export function useMeetings() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("meetings")
-        .select("*")
+        .select("*, sessions(id, transcript, summary, language_detected, created_at, analytics_data, processing_status)")
         .eq("is_deleted", false)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data;
+      return (data ?? []) as unknown as MeetingWithSessions[];
     },
     enabled: !!user,
   });
@@ -41,10 +55,10 @@ export function useMeetings() {
   }, [user, queryClient]);
 
   const createMeeting = useMutation({
-    mutationFn: async (title: string) => {
+    mutationFn: async ({ title, source }: { title: string; source?: string }) => {
       const { data, error } = await supabase
         .from("meetings")
-        .insert({ title, owner_id: user!.id })
+        .insert({ title, owner_id: user!.id, ...(source ? { source } : {}) })
         .select()
         .single();
       if (error) throw error;

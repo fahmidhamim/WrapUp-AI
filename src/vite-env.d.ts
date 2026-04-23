@@ -14,10 +14,13 @@ interface Window {
       options: import("./lib/desktop-capture").DesktopCaptureOptions,
     ) => Promise<import("./lib/desktop-capture").DesktopCaptureState>;
     stopCapture: () => Promise<import("./lib/desktop-capture").DesktopCaptureStopResult>;
+    setCaptureMicMuted: (muted: boolean) => { applied: boolean; muted: boolean };
     listFinalizedCaptureSpools: () => Promise<import("./lib/finalized-capture-spools").FinalizedCaptureSpoolItem[]>;
     listUploadQueueItems: () => Promise<import("./lib/upload-queue").UploadQueueItem[]>;
     claimNextUploadQueueItem: () => Promise<import("./lib/upload-queue").UploadQueueItem | null>;
-    runNextForegroundUpload: () => Promise<import("./lib/upload-queue").RunNextForegroundUploadResult>;
+    runNextForegroundUpload: (
+      options?: import("./lib/upload-queue").RunNextForegroundUploadOptions,
+    ) => Promise<import("./lib/upload-queue").RunNextForegroundUploadResult>;
     markUploadQueueItemUploaded: (
       payload: { id: string; deleteTempFile?: boolean },
     ) => Promise<import("./lib/upload-queue").MarkUploadQueueItemUploadedResult>;

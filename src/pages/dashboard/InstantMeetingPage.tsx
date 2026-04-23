@@ -1,284 +1,452 @@
-import { AlertCircle, Loader2, Mic, Monitor, PhoneOff, Radio } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { BackendRuntimeNotice } from "@/components/common/BackendRuntimeNotice";
+import {
+  BarChart3,
+  Info,
+  Loader2,
+  Mic,
+  MicOff,
+  PhoneOff,
+  Sparkles,
+  Speaker,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { BackendStatusDot } from "@/components/instant/BackendStatusDot";
+import { WaveformBars } from "@/components/instant/WaveformBars";
 import {
   getDesktopCaptureState,
   isDesktopCaptureAvailable,
+  setDesktopCaptureMicMuted,
   startDesktopCapture,
   stopDesktopCapture,
   subscribeToDesktopCaptureState,
+  type DesktopCaptureStopResult,
   type DesktopCaptureState,
 } from "@/lib/desktop-capture";
-import { deleteFinalizedCaptureSpool } from "@/lib/finalized-capture-spools";
-import {
-  listUploadQueueItems,
-  runNextForegroundUpload,
-  retryUploadQueueItem,
-  type UploadQueueItem,
-} from "@/lib/upload-queue";
 import { isDesktopApp, openExternalUrl } from "@/lib/app-shell";
 import { useBackendRuntimeStatus } from "@/hooks/use-backend-runtime-status";
+import { useAuth } from "@/hooks/useAuth";
+import { useMeetings } from "@/hooks/useMeetings";
+import { useMeetingDetail } from "@/hooks/useMeetingDetail";
+import { useActionItems } from "@/hooks/useActionItems";
+import { runNextForegroundUpload } from "@/lib/upload-queue";
+import { startSessionProcessing } from "@/lib/session-processing";
+import { supabase } from "@/integrations/supabase/client";
+import { deleteFinalizedCaptureSpool } from "@/lib/finalized-capture-spools";
+import { LANGUAGES } from "@/lib/languages";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+
+type InsightTab = "transcript" | "actions" | "analytics" | "askai" | "notes";
+
+const TABS: { id: InsightTab; label: string }[] = [
+  { id: "transcript", label: "Transcript" },
+  { id: "actions", label: "Actions" },
+  { id: "analytics", label: "Analytics" },
+  { id: "askai", label: "Ask AI" },
+  { id: "notes", label: "Notes" },
+];
+const MIN_CAPTURE_UPLOAD_BYTES = 64 * 1024;
+
+type SummaryPayload = {
+  executive_summary?: string;
+  key_points?: string[];
+  action_items?: Array<{ task?: string; owner?: string; deadline?: string; confidence?: number } | string>;
+  decisions?: string[];
+  follow_ups?: string[];
+};
+type AnalyticsPayload = {
+  language?: string;
+  sentiment?: string;
+  engagement_score?: number;
+  meeting_duration_seconds?: number;
+  speaking_time_seconds?: Record<string, number>;
+  keyword_frequency?: Array<{ keyword?: string; word?: string; count?: number }>;
+};
+
+function parseSummary(raw: unknown): SummaryPayload {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as SummaryPayload;
+    } catch {
+      return {};
+    }
+  }
+  if (typeof raw === "object") return raw as SummaryPayload;
+  return {};
+}
+
+function parseAnalytics(raw: unknown): AnalyticsPayload {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as AnalyticsPayload;
+    } catch {
+      return {};
+    }
+  }
+  if (typeof raw === "object") return raw as AnalyticsPayload;
+  return {};
+}
+
+function formatDuration(totalSeconds: number): string {
+  const value = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const seconds = value % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (hours > 0) return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  return `${pad(minutes)}:${pad(seconds)}`;
+}
+
+function deriveProcessingStatus(session: any): {
+  status: string;
+  message: string;
+  progress: number;
+} {
+  if (!session) return { status: "idle", message: "", progress: 0 };
+  const status = String(
+    session.processing_status ??
+      session.analytics_data?.processing_status?.status ??
+      "idle",
+  );
+  const message = String(
+    session.processing_message ??
+      session.analytics_data?.processing_status?.message ??
+      "",
+  );
+  const progress = Number(
+    session.processing_progress ??
+      session.analytics_data?.processing_status?.progress ??
+      0,
+  );
+  return { status, message, progress: Number.isFinite(progress) ? progress : 0 };
+}
+
+function formatHms(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
 
 export default function InstantMeetingPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeState = location.state as { meetingName?: string; language?: string; autoStart?: boolean } | null;
+  const queryClient = useQueryClient();
   const [captureState, setCaptureState] = useState<DesktopCaptureState>(() => getDesktopCaptureState());
   const [captureMicrophone, setCaptureMicrophone] = useState(true);
-  const [captureSystemAudio, setCaptureSystemAudio] = useState(false);
-  const [lastCaptureSize, setLastCaptureSize] = useState<number | null>(null);
-  const [lastSpoolFilename, setLastSpoolFilename] = useState<string | null>(null);
-  const [lastSpoolPath, setLastSpoolPath] = useState<string | null>(null);
-  const [lastUploadedMeeting, setLastUploadedMeeting] = useState<{
-    meetingId: string;
-    sessionId: string;
-    meetingPath: string;
-    processingStarted: boolean;
-  } | null>(null);
-  const [uploadQueueItems, setUploadQueueItems] = useState<UploadQueueItem[]>([]);
-  const [uploadQueueError, setUploadQueueError] = useState<string | null>(null);
-  const [uploadingNext, setUploadingNext] = useState(false);
+  const [captureSystemAudio, setCaptureSystemAudio] = useState<boolean>(
+    () => getDesktopCaptureState().systemAudioSupported,
+  );
   const { status: backendRuntimeStatus, retry: retryBackend } = useBackendRuntimeStatus();
 
-  const refreshUploadQueueItems = async () => {
-    try {
-      const items = await listUploadQueueItems();
-      setUploadQueueItems(items);
-      setUploadQueueError(null);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to load upload queue items.";
-      setUploadQueueError(message);
+  const [isMuted, setIsMuted] = useState(false);
+  const [meetingTitle, setMeetingTitle] = useState(routeState?.meetingName ?? "");
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [stopping, setStopping] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const startRef = useRef<number | null>(null);
+
+  const [activeTab, setActiveTab] = useState<InsightTab>("transcript");
+  const localSessionIdRef = useRef<string>(
+    typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Date.now()),
+  );
+  const [language, setLanguage] = useState(routeState?.language ?? "");
+  const [showLanguageReminderCard, setShowLanguageReminderCard] = useState(false);
+  const [languageReminderAcknowledged, setLanguageReminderAcknowledged] = useState(Boolean(routeState?.language));
+  const [languageOpen, setLanguageOpen] = useState(false);
+
+  const [webRecording, setWebRecording] = useState(false);
+  const [webStopping, setWebStopping] = useState(false);
+  const [autoStarting, setAutoStarting] = useState(Boolean(routeState?.autoStart && routeState?.language));
+  const webRecorderRef = useRef<MediaRecorder | null>(null);
+  const webChunksRef = useRef<Blob[]>([]);
+
+  const { user } = useAuth();
+  const { createMeeting } = useMeetings();
+  const { displayName, initials } = useMemo(() => {
+    const raw = (user?.user_metadata?.full_name as string | undefined) ||
+      (user?.user_metadata?.name as string | undefined) ||
+      user?.email?.split("@")[0] ||
+      "You";
+    const cleaned = raw.trim() || "You";
+    const parts = cleaned.split(/\s+/).filter(Boolean);
+    const init = (
+      parts.length >= 2
+        ? (parts[0][0] ?? "") + (parts[1][0] ?? "")
+        : cleaned.slice(0, 2)
+    ).toUpperCase() || "YO";
+    return { displayName: cleaned, initials: init };
+  }, [user]);
+
+  const [pinnedSessionId, setPinnedSessionId] = useState<string | null>(null);
+  useEffect(() => {
+    if (captureState.sessionId && !pinnedSessionId) {
+      setPinnedSessionId(captureState.sessionId);
     }
-  };
+  }, [captureState.sessionId, pinnedSessionId]);
+
+  const notesKey = `instant-meeting-notes:${pinnedSessionId ?? localSessionIdRef.current}`;
+
+  const [endedMeetingId, setEndedMeetingId] = useState<string | null>(null);
+  const { sessionsQuery } = useMeetingDetail(endedMeetingId ?? undefined);
+  const { actionItemsQuery } = useActionItems();
+
+  const latestSession: any = sessionsQuery.data?.[0];
+  const latestTranscript: string = latestSession?.transcript ?? "";
+  const latestSummary: SummaryPayload = useMemo(
+    () => parseSummary(latestSession?.summary),
+    [latestSession?.summary],
+  );
+  const latestAnalytics: AnalyticsPayload = useMemo(
+    () => parseAnalytics(latestSession?.analytics_data),
+    [latestSession?.analytics_data],
+  );
+  const { status: processingStatus, message: processingMessage, progress: processingProgress } =
+    deriveProcessingStatus(latestSession);
+  const meetingActions = useMemo(
+    () => (actionItemsQuery.data ?? []).filter((a: any) => a.meeting_id === endedMeetingId),
+    [actionItemsQuery.data, endedMeetingId],
+  );
 
   useEffect(() => {
     const unsubscribe = subscribeToDesktopCaptureState((state) => {
       setCaptureState(state);
     });
-
-    void refreshUploadQueueItems();
-
     return () => {
       unsubscribe();
       void stopDesktopCapture();
+      const rec = webRecorderRef.current;
+      if (rec && rec.state !== "inactive") {
+        rec.stop();
+        rec.stream?.getTracks().forEach((t) => t.stop());
+      }
     };
   }, []);
 
-  const desktopCaptureAvailable = isDesktopCaptureAvailable() && captureState.desktopSupported;
-  const isBusy = captureState.status === "starting" || captureState.status === "stopping";
-  const isRecording = captureState.status === "recording";
+  const isBusy = captureState.status === "starting" || captureState.status === "stopping" || webStopping;
+  const isRecording = captureState.status === "recording" || webRecording;
+
+  const [hasEntered, setHasEntered] = useState(false);
+  useEffect(() => {
+    if (isRecording) setHasEntered(true);
+  }, [isRecording]);
+
+  const inActiveView = hasEntered;
+  const isEnded =
+    hasEntered &&
+    captureState.status !== "recording" &&
+    captureState.status !== "starting" &&
+    captureState.status !== "stopping" &&
+    !webRecording &&
+    !webStopping;
+
+  useEffect(() => {
+    if (!isRecording) {
+      startRef.current = null;
+      return;
+    }
+    startRef.current = Date.now();
+    setElapsedMs(0);
+    const id = window.setInterval(() => {
+      if (startRef.current != null) {
+        setElapsedMs(Date.now() - startRef.current);
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isRecording]);
+
+  useEffect(() => {
+    if (!inActiveView) {
+      setMounted(false);
+      return;
+    }
+    const raf = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(raf);
+  }, [inActiveView]);
+
   const isMacDesktop =
     typeof navigator !== "undefined" &&
     isDesktopApp() &&
     /mac/i.test(navigator.platform || navigator.userAgent);
 
-  const statusLabel = useMemo(() => {
-    switch (captureState.status) {
-      case "starting":
-        return "Starting desktop capture...";
-      case "recording":
-        return "Desktop capture is running";
-      case "stopping":
-        return "Stopping desktop capture...";
-      case "error":
-        return "Desktop capture needs attention";
-      default:
-        return "Ready to start a desktop capture session";
+  const systemAudioAvailable = isDesktopCaptureAvailable() && captureState.systemAudioSupported;
+
+  const backendOffline = backendRuntimeStatus?.state === "unavailable";
+
+  const startDisabled =
+    isBusy || backendOffline || (!captureMicrophone && !captureSystemAudio) || !language;
+
+  const startLabel = useMemo(() => {
+    if (backendOffline) return "AI engine offline — retry first";
+    if (!captureMicrophone && !captureSystemAudio) return "Enable audio source to start";
+    if (!language) return "Select language to start";
+    return "Start Capture";
+  }, [backendOffline, captureMicrophone, captureSystemAudio, language]);
+
+  const startWebRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const recorder = new MediaRecorder(stream);
+      webChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) webChunksRef.current.push(e.data);
+      };
+      recorder.start(1000);
+      webRecorderRef.current = recorder;
+      setWebRecording(true);
+      setHasEntered(true);
+      setAutoStarting(false);
+      toast.success("Recording started.");
+    } catch {
+      toast.error("Microphone unavailable or permission denied.");
+      setAutoStarting(false);
     }
-  }, [captureState.status]);
-
-  const sourceSummary = useMemo(() => {
-    const activeSources = [
-      captureState.captureMicrophone ? "microphone" : null,
-      captureState.captureSystemAudio ? "system audio" : null,
-    ].filter(Boolean);
-
-    return activeSources.length > 0 ? activeSources.join(" + ") : "nothing selected yet";
-  }, [captureState.captureMicrophone, captureState.captureSystemAudio]);
-
-  const uploadQueueCounts = useMemo(() => {
-    return uploadQueueItems.reduce(
-      (counts, item) => {
-        counts[item.uploadStatus] += 1;
-        return counts;
-      },
-      {
-        ready: 0,
-        uploading: 0,
-        uploaded: 0,
-        failed: 0,
-      },
-    );
-  }, [uploadQueueItems]);
-
-  const formatBytes = (value: number) => {
-    if (value < 1024) return `${value} B`;
-    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const getMeetingDetailsPath = (meetingId: string, sessionId: string) => {
-    return `/dashboard/meetings/${meetingId}?sessionId=${encodeURIComponent(sessionId)}`;
+  const stopWebRecording = async () => {
+    const recorder = webRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") return;
+
+    setWebStopping(true);
+
+    await new Promise<void>((resolve) => {
+      recorder.onstop = () => resolve();
+      recorder.stop();
+      recorder.stream?.getTracks().forEach((t) => t.stop());
+    });
+
+    setWebRecording(false);
+
+    const blob = new Blob(webChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+
+    if (blob.size < MIN_CAPTURE_UPLOAD_BYTES) {
+      toast.error("Recording too short or silent. Record a longer meeting.");
+      setWebStopping(false);
+      return;
+    }
+
+    setStopping(true);
+    try {
+      const targetMeeting = await createMeeting.mutateAsync({
+        title: meetingTitle.trim() || `Meeting — ${new Date().toLocaleString()}`,
+        source: "live",
+      });
+      const targetMeetingId = targetMeeting.id;
+
+      const ext = recorder.mimeType?.includes("mp4") ? "mp4" : "webm";
+      const filePath = `${user?.id}/${targetMeetingId}/${Date.now()}-recording.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("meeting-files")
+        .upload(filePath, blob);
+      if (uploadError) throw uploadError;
+
+      const audioStorageRef = `meeting-files/${filePath}`;
+      const { data: createdSession, error: sessionError } = await supabase
+        .from("sessions")
+        .insert({ meeting_id: targetMeetingId, audio_file_url: audioStorageRef, language_detected: language })
+        .select("id")
+        .single();
+      if (sessionError) throw sessionError;
+
+      const { data: authData } = await supabase.auth.getSession();
+      const accessToken = authData.session?.access_token;
+      if (!accessToken) throw new Error("Authentication session missing.");
+
+      try {
+        await startSessionProcessing(createdSession.id, accessToken);
+      } catch {
+        setEndedMeetingId(targetMeetingId);
+        toast.warning("Recording uploaded, but processing could not start. You can retry from the meeting page.");
+        await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+        return;
+      }
+
+      setEndedMeetingId(targetMeetingId);
+      await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      toast.success("Meeting uploaded. Processing started.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setStopping(false);
+      setWebStopping(false);
+    }
   };
+
+  // Auto-start when navigated from NewMeetingPage with autoStart flag
+  useEffect(() => {
+    if (!routeState?.autoStart || !routeState?.language) return;
+    if (isDesktopCaptureAvailable()) {
+      startDesktopCapture({ captureMicrophone: true, captureSystemAudio: false, language: routeState.language })
+        .then(() => {
+          setIsMuted(false);
+          setDesktopCaptureMicMuted(false);
+          setAutoStarting(false);
+          toast.success("Recording started.");
+        })
+        .catch((err: unknown) => {
+          toast.error(err instanceof Error ? err.message : "Failed to start capture.");
+          setAutoStarting(false);
+        });
+    } else {
+      void startWebRecording();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStartCapture = async () => {
+    if (!isDesktopCaptureAvailable()) {
+      await startWebRecording();
+      return;
+    }
+    if (captureMicrophone && !captureSystemAudio && systemAudioAvailable) {
+      toast.error("Enable System audio before starting. Mic-only capture usually misses other speakers.");
+      return;
+    }
+    if (captureMicrophone && !captureSystemAudio && !systemAudioAvailable) {
+      toast.warning("System audio capture is unavailable on this platform. Transcript quality may be low.");
+    }
     try {
-      await startDesktopCapture({
-        captureMicrophone,
-        captureSystemAudio,
-      });
-      setLastCaptureSize(null);
-      setLastSpoolFilename(null);
-      setLastSpoolPath(null);
-      toast.success("Desktop capture started.");
+      await startDesktopCapture({ captureMicrophone, captureSystemAudio, language });
+      setIsMuted(false);
+      setDesktopCaptureMicMuted(false);
+      toast.success("Recording started.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to start desktop capture.");
+      toast.error(error instanceof Error ? error.message : "Failed to start capture.");
     }
   };
 
-  const handleStopCapture = async () => {
+  const handleStopCapture = async (): Promise<DesktopCaptureStopResult | null> => {
     try {
-      const result = await stopDesktopCapture();
-      setLastCaptureSize(result.size > 0 ? result.size : null);
-      setLastSpoolFilename(result.spoolFilename ?? null);
-      setLastSpoolPath(result.spoolPath ?? null);
-      await refreshUploadQueueItems();
-      toast.success(
-        result.spooled
-          ? "Capture stopped. The temporary local recording file was finalized successfully."
-          : "Capture stopped cleanly.",
-      );
+      return await stopDesktopCapture();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to stop desktop capture.");
-    }
-  };
-
-  const handleDeleteFinalizedSpool = async (id: string) => {
-    try {
-      const result = await deleteFinalizedCaptureSpool(id);
-      await refreshUploadQueueItems();
-
-      toast.success(
-        result.deleted
-          ? "Temporary capture file deleted."
-          : "Temporary capture file was already gone.",
-      );
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to delete the temporary capture file.",
-      );
-    }
-  };
-
-  const handleRunNextForegroundUpload = async () => {
-    try {
-      setUploadingNext(true);
-      const result = await runNextForegroundUpload();
-      await refreshUploadQueueItems();
-
-      if (result.outcome === "no_ready_item") {
-        toast("No ready temp capture files are waiting for upload.");
-        return;
-      }
-
-      if (result.outcome === "failed") {
-        toast.error(result.error ?? "Foreground upload failed.");
-        return;
-      }
-
-      if (!result.meetingId || !result.sessionId) {
-        toast.error("Upload finished, but no meeting link was returned.");
-        return;
-      }
-
-      const meetingPath = getMeetingDetailsPath(result.meetingId, result.sessionId);
-      setLastUploadedMeeting({
-        meetingId: result.meetingId,
-        sessionId: result.sessionId,
-        meetingPath,
-        processingStarted: result.processingStarted,
-      });
-
-      if (result.outcome === "uploaded_processing_not_started") {
-        toast.warning(
-          result.processStartError
-            ? `${result.error ?? "Audio uploaded successfully, but automatic processing did not start."} ${result.processStartError}`
-            : (result.error ?? "Audio uploaded successfully, but automatic processing did not start."),
-          {
-            action: {
-              label: "Open meeting",
-              onClick: () => navigate(meetingPath),
-            },
-          },
-        );
-      } else if (result.spoolFilename) {
-        toast.success(`Uploaded ${result.spoolFilename} with the existing web upload flow.`, {
-          action: {
-            label: "Open meeting",
-            onClick: () => navigate(meetingPath),
-          },
-        });
-      } else {
-        toast.success("Foreground upload finished successfully.", {
-          action: {
-            label: "Open meeting",
-            onClick: () => navigate(meetingPath),
-          },
-        });
-      }
-
-      if (result.tempFileDeleteError) {
-        toast.error(result.tempFileDeleteError);
-      }
-
-      navigate(meetingPath);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to run the next foreground upload.");
-    } finally {
-      setUploadingNext(false);
-    }
-  };
-
-  const handleRetryUploadQueueItem = async (id: string) => {
-    try {
-      const item = await retryUploadQueueItem(id);
-      await refreshUploadQueueItems();
-
-      if (!item) {
-        toast("That upload queue item is no longer available.");
-        return;
-      }
-
-      toast.success(`Returned ${item.spoolFilename} to the ready queue.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to retry the upload queue item.");
+      toast.error(error instanceof Error ? error.message : "Failed to stop capture.");
+      return null;
     }
   };
 
   const handleRetryBackendStartup = async () => {
     try {
       const status = await retryBackend();
-
-      if (!status) {
-        return;
-      }
-
+      if (!status) return;
       if (status.state === "ready") {
-        toast.success("Local backend is ready.");
-        return;
+        toast.success("AI engine is ready.");
+      } else if (status.state === "starting") {
+        toast("AI engine is starting…");
+      } else {
+        toast.error("AI engine is still offline.");
       }
-
-      if (status.state === "starting") {
-        toast("Local backend is starting...");
-        return;
-      }
-
-      toast.error(status.message ?? "Local backend is unavailable.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to restart the local backend.");
+    } catch {
+      toast.error("Failed to restart the AI engine.");
     }
   };
 
@@ -298,29 +466,405 @@ export default function InstantMeetingPage() {
     }
   };
 
+  const onStopAndSummarize = async () => {
+    if (!language) {
+      toast.error("Please select the audio language before ending the meeting.");
+      setLanguageOpen(true);
+      return;
+    }
+
+    setStopping(true);
+    try {
+      const stopResult = await handleStopCapture();
+      if (!stopResult?.spooled) {
+        toast.error("No recording found to upload.");
+        return;
+      }
+      if (stopResult.size < MIN_CAPTURE_UPLOAD_BYTES) {
+        if (stopResult.sessionId) {
+          await deleteFinalizedCaptureSpool(stopResult.sessionId).catch(() => undefined);
+        }
+        toast.error("Captured audio is too short or silent. Record a longer meeting with clear audio.");
+        return;
+      }
+
+      const resolvedTitle = meetingTitle.trim() || (() => {
+        const now = new Date();
+        const date = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+        return `Meeting — ${date} at ${time}`;
+      })();
+
+      const uploadResult = await runNextForegroundUpload({
+        language,
+        meetingTitle: resolvedTitle,
+        source: "recorded",
+      });
+
+      if (uploadResult.outcome === "uploaded" || uploadResult.outcome === "uploaded_processing_not_started") {
+        if (uploadResult.meetingId) {
+          setEndedMeetingId(uploadResult.meetingId);
+          const { error: titleUpdateError } = await supabase
+            .from("meetings")
+            .update({ title: resolvedTitle })
+            .eq("id", uploadResult.meetingId);
+          if (titleUpdateError) {
+            console.warn("Failed to update meeting title from renderer", titleUpdateError);
+          }
+        }
+        await queryClient.invalidateQueries({ queryKey: ["meetings"] });
+        if (uploadResult.outcome === "uploaded") {
+          toast.success("Meeting uploaded. Processing started.");
+        } else {
+          toast("Uploaded, but processing didn't start automatically.");
+        }
+      } else if (uploadResult.outcome === "failed") {
+        toast.error(uploadResult.error ?? "Failed to upload meeting.");
+      } else if (uploadResult.outcome === "no_ready_item") {
+        toast.error("No recording found to upload.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to finalize meeting.");
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const onLeave = () => {
+    if (isEnded) {
+      navigate(endedMeetingId ? `/dashboard/meetings/${endedMeetingId}` : "/dashboard/meetings");
+      return;
+    }
+    if (webRecording) {
+      void stopWebRecording();
+      return;
+    }
+    void onStopAndSummarize();
+  };
+
+  if (inActiveView) {
+    return (
+      <>
+        {showLanguageReminderCard && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/40">
+            <div className="mx-4 w-full max-w-sm rounded-xl border border-amber-400 bg-white dark:bg-gray-900 shadow-2xl shadow-amber-200/30 dark:shadow-amber-900/40 p-6 flex flex-col gap-4">
+              <div className="flex gap-3 items-start">
+                <Info className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">
+                    Language matters for accuracy
+                  </p>
+                  <p className="text-sm text-amber-700 dark:text-amber-400 leading-relaxed">
+                    Select the exact language spoken in your recording. A wrong selection can make transcript, summary, and action items inaccurate.
+                  </p>
+                </div>
+              </div>
+              <button
+                className="self-end text-sm font-semibold px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-white transition-colors"
+                onClick={() => {
+                  setShowLanguageReminderCard(false);
+                  setLanguageReminderAcknowledged(true);
+                  setLanguageOpen(true);
+                }}
+              >
+                OK, got it
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div
+          className={cn(
+            "flex flex-col h-[calc(100vh-160px)] gap-4 transition-all duration-300",
+            mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+          )}
+        >
+          {stopping && (
+            <div className="glass rounded-xl px-4 py-3 flex items-center gap-3 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span>Processing your meeting… summary will be ready in a moment</span>
+            </div>
+          )}
+
+          {/* ─── Top bar ─── */}
+          <div className="flex items-center gap-4 bg-[#141828] border border-white/[0.08] rounded-xl px-4 py-2.5">
+            <input
+              value={meetingTitle}
+              onChange={(e) => setMeetingTitle(e.target.value)}
+              placeholder="Meeting name…"
+              className="flex-1 min-w-0 bg-transparent border border-transparent hover:border-white/[0.08] focus:border-white/[0.12] rounded-md px-2 py-1 text-[15px] text-foreground placeholder:text-muted-foreground outline-none transition-colors"
+            />
+            <div className="flex items-center gap-2 shrink-0 font-mono text-sm">
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  isEnded ? "bg-muted-foreground" : "bg-[#EF4444] animate-pulse",
+                )}
+                aria-hidden
+              />
+              <span className="tabular-nums">{formatHms(elapsedMs)}</span>
+              {isEnded && (
+                <span className="ml-2 text-[10px] uppercase tracking-wider text-muted-foreground">Ended</span>
+              )}
+            </div>
+            <Button
+              size="sm"
+              className="shrink-0 bg-[#EF4444] hover:bg-[#EF4444]/90 text-white"
+              onClick={onLeave}
+              disabled={stopping || captureState.status === "stopping"}
+            >
+              <PhoneOff className="mr-1.5 h-4 w-4" /> Leave
+            </Button>
+          </div>
+
+          {/* ─── Main grid 60/40 ─── */}
+          <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4 flex-1 min-h-0">
+            {/* LEFT column */}
+            <div className="flex flex-col gap-4 min-h-0">
+              {/* Self-video tile */}
+              <div className="relative bg-[#141828] border border-white/[0.08] rounded-xl overflow-hidden flex-[65] min-h-[300px]">
+                <div className="w-full h-full flex items-center justify-center">
+                  <div className="h-24 w-24 rounded-full bg-[#6C3FE6] flex items-center justify-center text-3xl font-semibold text-white">
+                    {initials}
+                  </div>
+                </div>
+
+              {/* Name pill */}
+              <div className="absolute left-3 bottom-3 px-2.5 py-1 rounded-md bg-black/60 backdrop-blur text-xs text-white">
+                {displayName}
+              </div>
+
+              {/* REC / Ended badge */}
+              {isEnded ? (
+                <div className="absolute right-3 top-3 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur text-[10px] font-semibold uppercase tracking-wider text-white">
+                  Ended
+                </div>
+              ) : (
+                <div className="absolute right-3 top-3 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#EF4444]/90 text-[10px] font-semibold uppercase tracking-wider text-white">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" aria-hidden /> REC
+                </div>
+              )}
+
+              {/* Control bar */}
+              <div className="absolute left-1/2 -translate-x-1/2 bottom-14 flex items-center gap-3">
+                <ControlBtn
+                  active={!isMuted}
+                  onIcon={Mic}
+                  offIcon={MicOff}
+                  onClick={() => {
+                    setIsMuted((previouslyMuted) => {
+                      const nextMuted = !previouslyMuted;
+                      setDesktopCaptureMicMuted(nextMuted);
+                      return nextMuted;
+                    });
+                  }}
+                  ariaLabel={isMuted ? "Unmute microphone" : "Mute microphone"}
+                />
+                <ControlBtn
+                  active={false}
+                  onIcon={PhoneOff}
+                  offIcon={PhoneOff}
+                  onClick={onLeave}
+                  alwaysDanger
+                  ariaLabel="Leave"
+                />
+              </div>
+
+              {/* Waveform strip */}
+              <WaveformBars
+                count={20}
+                className="absolute left-1/2 -translate-x-1/2 bottom-3 w-[60%] h-6"
+                barClassName="w-[3px] animate-waveform-tall"
+              />
+            </div>
+
+            {/* Meeting insights */}
+            <div className="grid grid-cols-1 gap-3 flex-[35] min-h-0">
+              <InsightsPanel elapsedMs={elapsedMs} isRecording={isRecording} />
+            </div>
+          </div>
+
+          {/* RIGHT sidebar */}
+          <div className="flex flex-col gap-4 min-h-0">
+            {/* AI Summary card */}
+            <AISummaryCard
+              summary={latestSummary}
+              processingStatus={processingStatus}
+              processingProgress={processingProgress}
+              processingMessage={processingMessage}
+              isEnded={isEnded}
+              hasMeetingId={Boolean(endedMeetingId)}
+            />
+
+            {/* Tab row + language selector */}
+            <div className="flex items-center justify-between gap-3 border-b border-white/[0.08] pb-1">
+              <div className="flex items-center gap-1" role="tablist">
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    role="tab"
+                    aria-selected={activeTab === t.id}
+                    className={cn(
+                      "px-3 py-2 text-[12px] transition-colors relative",
+                      activeTab === t.id ? "text-white" : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setActiveTab(t.id)}
+                  >
+                    {t.label}
+                    {activeTab === t.id && (
+                      <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-[#6C3FE6]" aria-hidden />
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="w-[220px] shrink-0">
+                <Select
+                  value={language}
+                  onValueChange={(value) => {
+                    setLanguage(value);
+                    setLanguageOpen(false);
+                  }}
+                  open={languageOpen}
+                  onOpenChange={(open) => {
+                    if (open && !languageReminderAcknowledged) {
+                      setShowLanguageReminderCard(true);
+                    } else {
+                      setLanguageOpen(open);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs border-2 border-amber-500 shadow-[0_0_8px_2px_rgba(245,158,11,0.4)] hover:border-amber-400 hover:bg-amber-500/10 hover:text-amber-700 hover:shadow-[0_0_12px_3px_rgba(251,191,36,0.7)] focus:shadow-[0_0_12px_3px_rgba(245,158,11,0.6)]">
+                    <SelectValue placeholder="Language *" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LANGUAGES.map((item) => (
+                      <SelectItem
+                        key={item.code}
+                        value={item.code}
+                        className="focus:bg-amber-500/15 focus:text-amber-800 dark:focus:text-amber-300"
+                      >
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 min-h-0 bg-[#141828] border border-white/[0.08] rounded-xl p-4 overflow-y-auto">
+              {activeTab === "transcript" && (
+                <TranscriptTabContent
+                  transcript={latestTranscript}
+                  processingStatus={processingStatus}
+                  processingProgress={processingProgress}
+                  processingMessage={processingMessage}
+                  isEnded={isEnded}
+                  hasMeetingId={Boolean(endedMeetingId)}
+                />
+              )}
+              {activeTab === "actions" && (
+                <ActionsTabContent
+                  summary={latestSummary}
+                  actionItems={meetingActions}
+                  processingStatus={processingStatus}
+                  isEnded={isEnded}
+                  hasMeetingId={Boolean(endedMeetingId)}
+                />
+              )}
+              {activeTab === "analytics" && (
+                <AnalyticsTabContent
+                  analytics={latestAnalytics}
+                  processingStatus={processingStatus}
+                  isEnded={isEnded}
+                />
+              )}
+              {activeTab === "askai" && <AskAITabContent />}
+              {activeTab === "notes" && <NotesTabContent storageKey={notesKey} />}
+            </div>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // Auto-starting loading state — shown briefly while capture initializes
+  if (autoStarting) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Starting recording…</p>
+      </div>
+    );
+  }
+
+  // State 1 — Pre-capture card
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Instant Meeting</h1>
-
-      {!isRecording && !isBusy ? (
-        <div className="flex items-center justify-center min-h-[calc(100vh-180px)]">
-        <div className="glass rounded-xl p-8 text-center space-y-6 w-full max-w-2xl">
-          <div className="w-16 h-16 rounded-full gradient-bg mx-auto flex items-center justify-center">
-            <Radio className="h-8 w-8 text-primary-foreground" />
+      <div className="mx-auto w-full max-w-[560px] space-y-4">
+        {showLanguageReminderCard && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/40">
+            <div className="mx-4 w-full max-w-sm rounded-xl border border-amber-400 bg-white dark:bg-gray-900 shadow-2xl shadow-amber-200/30 dark:shadow-amber-900/40 p-6 flex flex-col gap-4">
+              <div className="flex gap-3 items-start">
+                <Info className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">
+                    Language matters for accuracy
+                  </p>
+                  <p className="text-sm text-amber-700 dark:text-amber-400 leading-relaxed">
+                    Select the exact language spoken in your recording. A wrong selection can make transcript, summary, and action items inaccurate.
+                  </p>
+                </div>
+              </div>
+              <button
+                className="self-end text-sm font-semibold px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-white transition-colors"
+                onClick={() => {
+                  setShowLanguageReminderCard(false);
+                  setLanguageReminderAcknowledged(true);
+                  setLanguageOpen(true);
+                }}
+              >
+                OK, got it
+              </button>
+            </div>
           </div>
-          <div className="space-y-2">
-            <h2 className="text-lg font-semibold">Start an Instant Meeting</h2>
-            <p className="text-sm font-medium">{statusLabel}</p>
-          </div>
-          <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-            This step writes desktop capture to a temporary local file, then lets you send one queued recording through the same upload path used by the web Upload section.
-          </p>
+        )}
 
-          <div className="space-y-3 text-left max-w-md mx-auto w-full">
-            <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-              <div>
-                <p className="text-sm font-medium">Microphone</p>
-                <p className="text-xs text-muted-foreground">Capture local mic input with echo cancellation.</p>
+        <div className="bg-[#141828] border border-white/[0.08] rounded-2xl p-8 space-y-6">
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative h-20 w-20 flex items-center justify-center">
+              <span
+                className="absolute inset-0 rounded-full border-2 border-[#6C3FE6] animate-pulse-ring"
+                aria-hidden
+              />
+              <span
+                className="absolute inset-0 rounded-full border-2 border-[#6C3FE6] animate-pulse-ring"
+                style={{ animationDelay: "750ms" }}
+                aria-hidden
+              />
+              <div className="h-12 w-12 rounded-full gradient-bg flex items-center justify-center relative">
+                <Mic className="h-6 w-6 text-primary-foreground" />
+              </div>
+            </div>
+            <div className="text-center space-y-1">
+              <h1 className="text-[18px] font-semibold text-foreground">Start an instant meeting</h1>
+              <p className="text-[13px] text-muted-foreground">
+                Record live · get real-time captions · auto-summary when done
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 px-4 py-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <Mic className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm text-foreground">Microphone</p>
+                  <p className="text-xs text-muted-foreground">
+                    Capture your voice with echo cancellation
+                  </p>
+                </div>
               </div>
               <Switch
                 checked={captureMicrophone}
@@ -329,225 +873,646 @@ export default function InstantMeetingPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-              <div>
-                <p className="text-sm font-medium">System audio + display share</p>
-                <p className="text-xs text-muted-foreground">
-                  Uses Electron desktop capture to request shared display audio.
-                </p>
+            <div
+              className={cn(
+                "flex items-center justify-between gap-4 rounded-xl border border-border/60 px-4 py-3",
+                !systemAudioAvailable && "opacity-40 pointer-events-none",
+              )}
+            >
+              <div className="flex items-start gap-3 min-w-0">
+                <Speaker className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm text-foreground">System audio</p>
+                  <p className="text-xs text-muted-foreground">
+                    Capture meeting audio from your screen
+                  </p>
+                </div>
               </div>
-              <Switch
-                checked={captureSystemAudio}
-                onCheckedChange={setCaptureSystemAudio}
-                disabled={isBusy || !captureState.systemAudioSupported}
+              {systemAudioAvailable ? (
+                <Switch
+                  checked={captureSystemAudio}
+                  onCheckedChange={setCaptureSystemAudio}
+                  disabled={isBusy}
+                />
+              ) : (
+                <Badge variant="outline" className="shrink-0 text-[10px] font-medium">
+                  Desktop app only
+                </Badge>
+              )}
+            </div>
+
+            <div className="border-t border-white/[0.08] pt-3">
+              <div className="mb-3">
+                <p className="text-sm text-foreground mb-1">
+                  Audio language <span className="text-destructive">*</span>
+                </p>
+                <Select
+                  value={language}
+                  onValueChange={(value) => {
+                    setLanguage(value);
+                    setLanguageOpen(false);
+                  }}
+                  open={languageOpen}
+                  onOpenChange={(open) => {
+                    if (open && !languageReminderAcknowledged) {
+                      setShowLanguageReminderCard(true);
+                    } else {
+                      setLanguageOpen(open);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="border-2 border-amber-500 shadow-[0_0_8px_2px_rgba(245,158,11,0.4)] hover:border-amber-400 hover:bg-amber-500/10 hover:text-amber-700 hover:shadow-[0_0_12px_3px_rgba(251,191,36,0.7)] focus:shadow-[0_0_12px_3px_rgba(245,158,11,0.6)]">
+                    <SelectValue placeholder="Select language to continue" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LANGUAGES.map((item) => (
+                      <SelectItem
+                        key={item.code}
+                        value={item.code}
+                        className="focus:bg-amber-500/15 focus:text-amber-800 dark:focus:text-amber-300"
+                      >
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <BackendStatusDot
+                status={backendRuntimeStatus}
+                onRetry={() => void handleRetryBackendStartup()}
               />
             </div>
           </div>
 
-          {!captureState.systemAudioSupported && (
-            <p className="text-xs text-muted-foreground max-w-md mx-auto">
-              System audio capture is currently supported on Windows only in this Electron foundation.
-            </p>
-          )}
-
-          {!desktopCaptureAvailable && (
-            <p className="text-xs text-muted-foreground max-w-md mx-auto">
-              Desktop capture is only available inside the Electron app. Web live capture is unchanged in this step.
-            </p>
-          )}
-
-          {captureState.error && (
-            <div className="max-w-md mx-auto rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-left flex gap-3">
-              <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-              <p className="text-sm text-destructive">{captureState.error}</p>
-            </div>
-          )}
-
-          {isMacDesktop && (
-            <div className="max-w-md mx-auto rounded-xl border border-border/70 px-4 py-3 text-left space-y-2">
-              <p className="text-xs text-muted-foreground">
-                macOS setup: allow <span className="font-medium text-foreground">Microphone</span> for Electron before starting capture.
-                Screen Recording is only needed if you turn on display share.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => void handleOpenMacMicrophoneSettings()}
-                >
-                  Open Microphone settings
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => void handleOpenMacScreenRecordingSettings()}
-                >
-                  Open Screen Recording
-                </Button>
-              </div>
-            </div>
-          )}
-
-          <div className="max-w-md mx-auto w-full">
-            <BackendRuntimeNotice
-              status={backendRuntimeStatus}
-              onRetry={() => void handleRetryBackendStartup()}
-            />
-          </div>
-
-          {lastCaptureSize !== null && (
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">
-                Last capture size: {formatBytes(lastCaptureSize)}
-              </p>
-              {lastSpoolFilename && (
-                <p className="text-xs text-muted-foreground">
-                  Last temp spool file: {lastSpoolFilename}
-                </p>
-              )}
-              {lastSpoolPath && (
-                <p className="text-[11px] text-muted-foreground break-all">
-                  Stored at: {lastSpoolPath}
-                </p>
-              )}
-            </div>
-          )}
-
-          {lastUploadedMeeting && (
-            <div className="max-w-md mx-auto w-full rounded-xl border border-border px-4 py-3 text-left space-y-2">
-              <p className="text-xs font-medium text-foreground">Latest uploaded meeting</p>
-              <p className="text-xs text-muted-foreground">
-                {lastUploadedMeeting.processingStarted
-                  ? "Upload completed and the meeting details page is ready."
-                  : "Upload completed, but automatic processing did not start yet."}
-              </p>
-              <Link to={lastUploadedMeeting.meetingPath} className="text-xs text-primary underline underline-offset-4">
-                Open meeting details
-              </Link>
-            </div>
-          )}
-
-          {(uploadQueueItems.length > 0 || uploadQueueError) && (
-            <div className="max-w-md mx-auto w-full rounded-xl border border-border px-4 py-3 text-left space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium text-foreground">Upload queue</p>
-                  <p className="text-xs text-muted-foreground">
-                    Ready {uploadQueueCounts.ready} • Uploading {uploadQueueCounts.uploading} • Uploaded {uploadQueueCounts.uploaded} • Failed {uploadQueueCounts.failed}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 shrink-0 px-2 text-xs"
-                  onClick={() => void handleRunNextForegroundUpload()}
-                  disabled={uploadingNext}
-                >
-                  {uploadingNext ? "Uploading..." : "Upload next"}
-                </Button>
-              </div>
-
-              {uploadQueueError ? (
-                <p className="text-xs text-destructive">{uploadQueueError}</p>
-              ) : (
-                uploadQueueItems.slice(0, 3).map((item) => (
-                  <div key={item.id} className="space-y-2 rounded-lg border border-border/70 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-foreground truncate">{item.spoolFilename}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {formatBytes(item.size)} • {item.uploadStatus} • {new Date(item.finalizedAt).toLocaleString()}
-                      </p>
-                      {item.lastUploadError && (
-                        <p className="text-[11px] text-destructive">{item.lastUploadError}</p>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {item.uploadStatus === "failed" && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => void handleRetryUploadQueueItem(item.id)}
-                        >
-                          Retry
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => void handleDeleteFinalizedSpool(item.id)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
           <Button
-            className="gradient-bg text-primary-foreground font-semibold"
+            className="w-full gradient-bg text-primary-foreground font-semibold"
             onClick={() => void handleStartCapture()}
-            disabled={!desktopCaptureAvailable || (!captureMicrophone && !captureSystemAudio)}
+            disabled={startDisabled}
           >
-            <Mic className="h-4 w-4 mr-2" /> Start Capture
+            <Mic className="mr-2 h-4 w-4" /> {startLabel}
           </Button>
         </div>
-        </div>
-      ) : (
-        <div className="glass rounded-xl p-6 space-y-6">
-          <div className="text-center">
-            <div className="w-12 h-12 rounded-full gradient-bg mx-auto flex items-center justify-center animate-pulse-glow">
-              {isBusy ? <Loader2 className="h-6 w-6 text-primary-foreground animate-spin" /> : <Radio className="h-6 w-6 text-primary-foreground" />}
+
+        {isMacDesktop && (
+          <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+            <button
+              type="button"
+              className="hover:text-foreground underline-offset-4 hover:underline transition-colors"
+              onClick={() => void handleOpenMacMicrophoneSettings()}
+            >
+              Allow microphone access
+            </button>
+            <span aria-hidden>·</span>
+            <button
+              type="button"
+              className="hover:text-foreground underline-offset-4 hover:underline transition-colors"
+              onClick={() => void handleOpenMacScreenRecordingSettings()}
+            >
+              Allow screen recording
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface ControlBtnProps {
+  active: boolean;
+  onIcon: LucideIcon;
+  offIcon: LucideIcon;
+  onClick: () => void;
+  alwaysDanger?: boolean;
+  ariaLabel: string;
+}
+
+function ControlBtn({ active, onIcon: OnIcon, offIcon: OffIcon, onClick, alwaysDanger, ariaLabel }: ControlBtnProps) {
+  const Icon = active ? OnIcon : OffIcon;
+  const danger = alwaysDanger || !active;
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      onClick={onClick}
+      className={cn(
+        "h-11 w-11 rounded-full flex items-center justify-center border transition-colors",
+        danger
+          ? "bg-[#EF4444] hover:bg-[#EF4444]/90 border-transparent text-white"
+          : "bg-[#141828]/80 hover:bg-[#141828] border-white/[0.1] text-white backdrop-blur",
+      )}
+    >
+      <Icon className="h-[18px] w-[18px]" />
+    </button>
+  );
+}
+
+function InsightsPanel({ elapsedMs, isRecording }: { elapsedMs: number; isRecording: boolean }) {
+  const [progress, setProgress] = useState({ discussion: 0, decisions: 0, actions: 0 });
+  useEffect(() => {
+    if (!isRecording) {
+      return;
+    }
+
+    const id = window.setInterval(() => {
+      setProgress((p) => ({
+        discussion: Math.min(100, p.discussion + Math.round(Math.random() * 6 + 2)),
+        decisions: Math.min(100, p.decisions + Math.round(Math.random() * 3)),
+        actions: Math.min(100, p.actions + Math.round(Math.random() * 4)),
+      }));
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [isRecording]);
+
+  const rows = [
+    { label: "Discussion", value: progress.discussion },
+    { label: "Decisions", value: progress.decisions },
+    { label: "Action Items", value: progress.actions },
+  ];
+
+  return (
+    <div className="bg-[#141828] border border-white/[0.08] rounded-xl p-4 flex flex-col min-h-0">
+      <div className="flex items-center gap-2 mb-3">
+        <BarChart3 className="h-4 w-4 text-[#6C3FE6]" />
+        <h3 className="text-sm font-semibold">Meeting Insights</h3>
+      </div>
+      <div className="flex-1 min-h-0 space-y-3">
+        {rows.map((r) => (
+          <div key={r.label} className="space-y-1">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-muted-foreground">{r.label}</span>
+              <span className="tabular-nums text-muted-foreground">{r.value}%</span>
             </div>
-            <p className="text-sm font-medium mt-3">{statusLabel}</p>
-            <p className="text-xs text-muted-foreground">Active sources: {sourceSummary}</p>
+            <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-[#6C3FE6] transition-[width] duration-500"
+                style={{ width: `${r.value}%` }}
+              />
+            </div>
           </div>
+        ))}
+      </div>
+      <div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>Duration</span>
+        <span className="tabular-nums font-mono">{formatHms(elapsedMs)}</span>
+      </div>
+    </div>
+  );
+}
 
-          <div className="border border-border rounded-xl min-h-[200px] p-4">
-            <p className="text-sm text-muted-foreground italic">
-              Desktop capture is active. Live transcription and upload are intentionally not wired in this step.
+function AISummaryCard({
+  summary,
+  processingStatus,
+  processingProgress,
+  processingMessage,
+  isEnded,
+  hasMeetingId,
+}: {
+  summary: SummaryPayload;
+  processingStatus: string;
+  processingProgress: number;
+  processingMessage: string;
+  isEnded: boolean;
+  hasMeetingId: boolean;
+}) {
+  const exec = summary.executive_summary?.trim();
+  const body = (() => {
+    if (exec) return <p className="text-xs text-foreground/90 whitespace-pre-wrap">{exec}</p>;
+    if (!isEnded) {
+      return (
+        <p className="text-xs italic text-muted-foreground">
+          Your meeting summary will appear here automatically when you end the meeting…
+        </p>
+      );
+    }
+    if (!hasMeetingId) {
+      return (
+        <p className="text-xs italic text-muted-foreground">
+          Finalizing upload…
+        </p>
+      );
+    }
+    if (processingStatus === "failed") {
+      return (
+        <p className="text-xs italic text-destructive">
+          Summary generation failed. Open the meeting page to retry.
+        </p>
+      );
+    }
+    return (
+      <div className="space-y-1.5">
+        <p className="text-xs italic text-muted-foreground">
+          {processingMessage || "Generating summary…"}
+        </p>
+        {processingProgress > 0 && (
+          <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
+            <div
+              className="h-full rounded-full bg-[#6C3FE6] transition-[width] duration-500"
+              style={{ width: `${Math.min(100, processingProgress)}%` }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  })();
+
+  return (
+    <div className="bg-[#141828] border border-white/[0.08] rounded-xl overflow-hidden max-h-[240px] flex flex-col">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-[#6C3FE6]/15 border-b border-white/[0.08] shrink-0">
+        <Sparkles className="h-4 w-4 text-[#6C3FE6]" />
+        <h2 className="text-sm font-semibold">AI Summary</h2>
+      </div>
+      <div className="px-4 py-4 overflow-y-auto">{body}</div>
+    </div>
+  );
+}
+
+function TranscriptTabContent({
+  transcript,
+  processingStatus,
+  processingProgress,
+  processingMessage,
+  isEnded,
+  hasMeetingId,
+}: {
+  transcript: string;
+  processingStatus: string;
+  processingProgress: number;
+  processingMessage: string;
+  isEnded: boolean;
+  hasMeetingId: boolean;
+}) {
+  if (transcript) {
+    const lines = transcript.split("\n").filter((l) => l.trim().length > 0);
+    return (
+      <div className="h-full text-xs space-y-2">
+        {lines.map((line, idx) => {
+          const match = line.match(/^\[(\d{2}:\d{2})(?:-\d{2}:\d{2})?\]\s+([^:]+):\s*(.*)$/);
+          if (!match) {
+            return (
+              <p key={idx} className="text-foreground/90 whitespace-pre-wrap">{line}</p>
+            );
+          }
+          const [, time, speaker, text] = match;
+          return (
+            <p key={idx} className="text-foreground/90 whitespace-pre-wrap">
+              <span className="text-muted-foreground">[{time}] </span>
+              <span className="font-medium">{speaker}:</span>{" "}
+              <span>{text}</span>
             </p>
-          </div>
+          );
+        })}
+      </div>
+    );
+  }
 
-          <div className="flex justify-center gap-3">
-            <Button
-              variant="outline"
-              className="rounded-full h-12 px-4"
-              disabled
-            >
-              <Mic className="h-5 w-5" />
-              {captureState.captureMicrophone ? "Mic enabled" : "Mic off"}
-            </Button>
-            <Button
-              variant="outline"
-              className="rounded-full h-12 px-4"
-              disabled
-            >
-              <Monitor className="h-5 w-5" />
-              {captureState.captureSystemAudio ? "System audio enabled" : "System audio off"}
-            </Button>
-            <Button
-              variant="destructive"
-              size="icon"
-              className="rounded-full w-12 h-12"
-              onClick={() => void handleStopCapture()}
-              disabled={isBusy}
-            >
-              {captureState.status === "stopping" ? <Loader2 className="h-5 w-5 animate-spin" /> : <PhoneOff className="h-5 w-5" />}
-            </Button>
-          </div>
+  if (!isEnded) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
+        <p className="text-xs italic text-muted-foreground px-4">
+          Listening… transcript will appear after processing
+        </p>
+        <WaveformBars count={5} className="h-8" barClassName="w-[4px]" />
+      </div>
+    );
+  }
+
+  if (!hasMeetingId) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        <p className="text-xs italic text-muted-foreground px-4">Finalizing upload…</p>
+      </div>
+    );
+  }
+
+  if (processingStatus === "failed") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+        <p className="text-xs italic text-destructive px-4">Transcription failed.</p>
+        <p className="text-[11px] text-muted-foreground px-4">
+          Open the meeting page to retry.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      <p className="text-xs italic text-muted-foreground px-4">
+        {processingMessage || "Transcribing…"}
+      </p>
+      {processingProgress > 0 && (
+        <div className="w-40 h-1 rounded-full bg-white/[0.06] overflow-hidden">
+          <div
+            className="h-full rounded-full bg-[#6C3FE6] transition-[width] duration-500"
+            style={{ width: `${Math.min(100, processingProgress)}%` }}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+function ActionsTabContent({
+  summary,
+  actionItems,
+  processingStatus,
+  isEnded,
+  hasMeetingId,
+}: {
+  summary: SummaryPayload;
+  actionItems: any[];
+  processingStatus: string;
+  isEnded: boolean;
+  hasMeetingId: boolean;
+}) {
+  const summaryActions = Array.isArray(summary.action_items) ? summary.action_items : [];
+  const hasActionItems = actionItems.length > 0 || summaryActions.length > 0;
+
+  if (hasActionItems) {
+    return (
+      <div className="h-full text-xs space-y-2">
+        {actionItems.map((a) => (
+          <div key={a.id} className="flex items-start gap-2 p-2 rounded-md bg-white/[0.03]">
+            <span
+              className={cn(
+                "mt-0.5 h-3.5 w-3.5 rounded-[4px] border shrink-0",
+                a.is_completed
+                  ? "bg-[#10B981] border-[#10B981]"
+                  : "border-white/[0.2]",
+              )}
+              aria-hidden
+            />
+            <span
+              className={cn(
+                "flex-1 min-w-0 break-words",
+                a.is_completed && "line-through text-muted-foreground",
+              )}
+            >
+              {a.title}
+            </span>
+          </div>
+        ))}
+        {actionItems.length === 0 &&
+          summaryActions.map((a, i) => {
+            const label =
+              typeof a === "string"
+                ? a
+                : [a.task, a.owner ? `— ${a.owner}` : "", a.deadline ? `(${a.deadline})` : ""]
+                    .filter(Boolean)
+                    .join(" ")
+                    .trim() || "Action item";
+            return (
+              <div key={i} className="flex items-start gap-2 p-2 rounded-md bg-white/[0.03]">
+                <span
+                  className="mt-0.5 h-3.5 w-3.5 rounded-[4px] border border-white/[0.2] shrink-0"
+                  aria-hidden
+                />
+                <span className="flex-1 min-w-0 break-words">{label}</span>
+              </div>
+            );
+          })}
+      </div>
+    );
+  }
+
+  if (!isEnded || !hasMeetingId) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
+        <p className="text-xs italic text-muted-foreground px-4">
+          Action items will be extracted automatically after your meeting ends…
+        </p>
+        <div className="w-full max-w-[200px] space-y-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="h-3.5 w-3.5 rounded-[4px] border border-white/[0.1]" aria-hidden />
+              <span className="flex-1 h-2 rounded-full bg-white/[0.06]" aria-hidden />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (processingStatus === "failed") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+        <p className="text-xs italic text-destructive px-4">Processing failed.</p>
+      </div>
+    );
+  }
+
+  if (processingStatus === "completed") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+        <p className="text-xs italic text-muted-foreground px-4">
+          No action items found for this meeting.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      <p className="text-xs italic text-muted-foreground px-4">Extracting action items…</p>
+    </div>
+  );
+}
+
+function AnalyticsTabContent({
+  analytics,
+  processingStatus,
+  isEnded,
+}: {
+  analytics: AnalyticsPayload;
+  processingStatus: string;
+  isEnded: boolean;
+}) {
+  const speaking = analytics.speaking_time_seconds && typeof analytics.speaking_time_seconds === "object"
+    ? Object.entries(analytics.speaking_time_seconds)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+    : [];
+  const keywords = Array.isArray(analytics.keyword_frequency)
+    ? analytics.keyword_frequency
+        .map((entry) => ({
+          label: String(entry.keyword ?? entry.word ?? "").trim(),
+          count: Number(entry.count ?? 0),
+        }))
+        .filter((entry) => entry.label.length > 0)
+        .slice(0, 8)
+    : [];
+  const hasAnalytics =
+    typeof analytics.engagement_score === "number" ||
+    typeof analytics.sentiment === "string" ||
+    typeof analytics.meeting_duration_seconds === "number" ||
+    speaking.length > 0 ||
+    keywords.length > 0;
+
+  if (hasAnalytics) {
+    return (
+      <div className="h-full text-xs space-y-4">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-md bg-white/[0.03] p-2">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Sentiment</p>
+            <p className="text-sm font-medium capitalize">{analytics.sentiment ?? "unknown"}</p>
+          </div>
+          <div className="rounded-md bg-white/[0.03] p-2">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Engagement</p>
+            <p className="text-sm font-medium">
+              {typeof analytics.engagement_score === "number" ? `${Math.round(analytics.engagement_score)}%` : "n/a"}
+            </p>
+          </div>
+          <div className="rounded-md bg-white/[0.03] p-2">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Language</p>
+            <p className="text-sm font-medium uppercase">{analytics.language ?? "und"}</p>
+          </div>
+          <div className="rounded-md bg-white/[0.03] p-2">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Duration</p>
+            <p className="text-sm font-medium">
+              {typeof analytics.meeting_duration_seconds === "number"
+                ? formatDuration(analytics.meeting_duration_seconds)
+                : "n/a"}
+            </p>
+          </div>
+        </div>
+
+        {speaking.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Speaker Time</p>
+            <div className="space-y-1.5">
+              {speaking.map(([speaker, seconds]) => (
+                <div key={speaker} className="flex items-center justify-between rounded-md bg-white/[0.03] px-2 py-1.5">
+                  <span className="truncate pr-2">{speaker}</span>
+                  <span className="tabular-nums text-muted-foreground">{formatDuration(seconds)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {keywords.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Top Keywords</p>
+            <div className="flex flex-wrap gap-1.5">
+              {keywords.map((entry, index) => (
+                <span
+                  key={`${entry.label}-${index}`}
+                  className="rounded-full border border-white/[0.1] px-2 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  {entry.label} {entry.count > 0 ? `(${entry.count})` : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!isEnded) {
+    const heights = [40, 72, 28, 60, 88];
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
+        <p className="text-xs italic text-muted-foreground px-4">
+          Analytics will be ready after processing completes…
+        </p>
+        <div className="flex items-end gap-2 h-24">
+          {heights.map((h, i) => (
+            <div
+              key={i}
+              className="w-5 rounded-t bg-white/[0.06]"
+              style={{ height: `${h}%` }}
+              aria-hidden
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (processingStatus === "failed") {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+        <p className="text-xs italic text-destructive px-4">Processing failed.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
+      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+      <p className="text-xs italic text-muted-foreground px-4">Analyzing meeting…</p>
+    </div>
+  );
+}
+
+function AskAITabContent() {
+  const [value, setValue] = useState("");
+  const chips = [
+    "What were the key decisions?",
+    "List all action items",
+    "Who spoke the most?",
+  ];
+  return (
+    <div className="h-full flex flex-col gap-3">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Ask anything about this meeting…"
+        className="w-full bg-transparent border border-white/[0.08] focus:border-white/[0.16] rounded-md px-3 py-2 text-xs outline-none"
+      />
+      <div className="flex flex-wrap gap-2">
+        {chips.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setValue(c)}
+            className="px-2.5 py-1 rounded-full border border-white/[0.1] text-[11px] text-muted-foreground hover:text-foreground hover:border-white/[0.2] transition-colors"
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NotesTabContent({ storageKey }: { storageKey: string }) {
+  const [value, setValue] = useState("");
+  const hydratedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (hydratedKeyRef.current === storageKey) return;
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      setValue(stored ?? "");
+    } catch {
+      setValue("");
+    }
+    hydratedKeyRef.current = storageKey;
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (hydratedKeyRef.current !== storageKey) return;
+    const id = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(storageKey, value);
+      } catch {
+        /* ignore quota errors */
+      }
+    }, 500);
+    return () => window.clearTimeout(id);
+  }, [value, storageKey]);
+
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      placeholder="Type your notes here…"
+      className="w-full h-full min-h-[180px] bg-transparent border border-white/[0.08] focus:border-white/[0.16] rounded-md p-3 text-xs outline-none resize-none"
+    />
   );
 }

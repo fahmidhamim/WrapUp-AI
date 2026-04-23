@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, HashRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { PaletteProvider } from "@/components/providers/PaletteProvider";
 import LiveChatbot from "@/components/common/LiveChatbot";
@@ -33,6 +33,7 @@ import MeetingsPage from "./pages/dashboard/MeetingsPage";
 import UpcomingMeetingsPage from "./pages/dashboard/UpcomingMeetingsPage";
 import MeetingDetailPage from "./pages/dashboard/MeetingDetailPage";
 import UploadPage from "./pages/dashboard/UploadPage";
+import NewMeetingPage from "./pages/dashboard/NewMeetingPage";
 import JoinMeetingPage from "./pages/dashboard/JoinMeetingPage";
 import InstantMeetingPage from "./pages/dashboard/InstantMeetingPage";
 import ScheduleMeetingPage from "./pages/dashboard/ScheduleMeetingPage";
@@ -164,7 +165,8 @@ const App = () => (
           <Route path="/dashboard/meetings" element={<DashboardLayout><MeetingsPage /></DashboardLayout>} />
           <Route path="/dashboard/upcoming" element={<DashboardLayout><UpcomingMeetingsPage /></DashboardLayout>} />
           <Route path="/dashboard/meetings/:id" element={<DashboardLayout><MeetingDetailPage /></DashboardLayout>} />
-          <Route path="/dashboard/upload" element={<DashboardLayout><UploadPage /></DashboardLayout>} />
+          <Route path="/dashboard/upload" element={<Navigate to="/dashboard/new-meeting" replace />} />
+          <Route path="/dashboard/new-meeting" element={<DashboardLayout><NewMeetingPage /></DashboardLayout>} />
           <Route path="/dashboard/join" element={<DashboardLayout><JoinMeetingPage /></DashboardLayout>} />
           <Route path="/dashboard/join/:id" element={<DashboardLayout><JoinMeetingPage /></DashboardLayout>} />
           <Route path="/dashboard/instant" element={<DashboardLayout><InstantMeetingPage /></DashboardLayout>} />
