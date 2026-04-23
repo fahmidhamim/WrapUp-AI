@@ -63,6 +63,7 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
         },
         glow: "hsl(var(--glow))",
+        success: "#10B981",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -98,6 +99,18 @@ export default {
           "56%": { transform: "scale(1)", opacity: "0.8" },
           "100%": { transform: "scale(1)", opacity: "0.8" },
         },
+        "waveform": {
+          "0%, 100%": { transform: "scaleY(0.35)" },
+          "50%": { transform: "scaleY(1)" },
+        },
+        "waveform-tall": {
+          "0%, 100%": { transform: "scaleY(0.143)" },
+          "50%": { transform: "scaleY(1)" },
+        },
+        "pulse-ring": {
+          "0%": { transform: "scale(1)", opacity: "0.6" },
+          "100%": { transform: "scale(1.3)", opacity: "0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -105,6 +118,9 @@ export default {
         "float": "float 6s ease-in-out infinite",
         "pulse-glow": "pulse-glow 3s ease-in-out infinite",
         "scroll-hint": "scroll-hint 2s ease-in-out infinite",
+        "waveform": "waveform 0.9s ease-in-out infinite",
+        "waveform-tall": "waveform-tall 0.9s ease-in-out infinite",
+        "pulse-ring": "pulse-ring 1.5s ease-out infinite",
       },
     },
   },

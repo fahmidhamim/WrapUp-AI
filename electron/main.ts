@@ -19,6 +19,7 @@ interface CaptureSpoolSession {
   spoolPath: string;
   spoolFilename: string;
   mimeType: string | null;
+  language: string | null;
   bytesWritten: number;
   createdAt: string;
   status: CaptureSpoolStatus;
@@ -33,6 +34,7 @@ interface FinalizedCaptureSpoolItem {
   spoolPath: string;
   mimeType: string | null;
   size: number;
+  language: string | null;
   createdAt: string;
   finalizedAt: string;
   status: FinalizedCaptureSpoolStatus;
@@ -50,6 +52,9 @@ interface CaptureSpoolManifest {
 interface ForegroundUploadCredentials {
   accessToken: string;
   userId: string;
+  language?: string;
+  meetingTitle?: string;
+  source?: string;
 }
 
 interface RunNextForegroundUploadResult {
@@ -82,6 +87,11 @@ let mainWindow: BrowserWindow | null = null;
 let pendingAuthCallbackUrl: string | null = extractAuthCallbackUrl(process.argv);
 let backendShutdownInProgress = false;
 let backendManager: BackendManager | null = null;
+
+app.commandLine.appendSwitch(
+  "disable-features",
+  "WebRtcAllowInputVolumeAdjustment,HardwareMediaKeyHandling",
+);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const WEB_UPLOAD_PATH_REFERENCE =
@@ -270,8 +280,9 @@ async function createMeetingForForegroundUpload(
       Prefer: "return=representation",
     },
     body: JSON.stringify({
-      title: getMeetingTitleFromFilename(spoolFilename),
+      title: credentials.meetingTitle?.trim() || getMeetingTitleFromFilename(spoolFilename),
       owner_id: credentials.userId,
+      ...(credentials.source ? { source: credentials.source } : {}),
     }),
   });
 
@@ -330,6 +341,7 @@ async function createForegroundUploadSession(
   meetingId: string,
   audioStorageRef: string,
 ) {
+  const selectedLanguage = normalizeCaptureLanguage(credentials.language);
   const { supabaseUrl, supabaseAnonKey } = await getForegroundUploadConfig();
   const response = await fetch(`${supabaseUrl}/rest/v1/sessions?select=id`, {
     method: "POST",
@@ -342,6 +354,7 @@ async function createForegroundUploadSession(
     body: JSON.stringify({
       meeting_id: meetingId,
       audio_file_url: audioStorageRef,
+      language_detected: selectedLanguage,
     }),
   });
 
@@ -472,6 +485,14 @@ function createCaptureFilename(mimeType: string | null | undefined) {
   return `capture-${timestamp}-${randomUUID()}${getCaptureExtension(mimeType)}`;
 }
 
+function normalizeCaptureLanguage(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function sortFinalizedCaptureSpoolItems(items: FinalizedCaptureSpoolItem[]) {
   return [...items].sort((left, right) => {
     const finalizedTimeDifference =
@@ -518,6 +539,7 @@ function parseFinalizedCaptureSpoolItem(value: unknown): FinalizedCaptureSpoolIt
     spoolPath: candidate.spoolPath,
     mimeType: typeof candidate.mimeType === "string" ? candidate.mimeType : null,
     size: candidate.size,
+    language: normalizeCaptureLanguage(typeof candidate.language === "string" ? candidate.language : null),
     createdAt: candidate.createdAt,
     finalizedAt: candidate.finalizedAt,
     status: "finalized",
@@ -648,13 +670,13 @@ function isActiveCaptureSpoolPath(spoolPath: string) {
 function sortUploadQueueClaimCandidates(items: FinalizedCaptureSpoolItem[]) {
   return [...items].sort((left, right) => {
     const finalizedTimeDifference =
-      new Date(left.finalizedAt).getTime() - new Date(right.finalizedAt).getTime();
+      new Date(right.finalizedAt).getTime() - new Date(left.finalizedAt).getTime();
 
     if (finalizedTimeDifference !== 0) {
       return finalizedTimeDifference;
     }
 
-    return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+    return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
   });
 }
 
@@ -745,7 +767,12 @@ function getCaptureSpoolSession(sessionId: string) {
   return captureSpoolSession;
 }
 
-async function createCaptureSpoolSession(mimeType: string | null | undefined) {
+async function createCaptureSpoolSession(
+  mimeType: string | null | undefined,
+  language: string | null | undefined,
+) {
+  await retireReadyUploadQueueItemsBeforeNewCapture();
+
   const spoolDirectory = getCaptureSpoolDirectory();
   const spoolFilename = createCaptureFilename(mimeType);
   const spoolPath = join(spoolDirectory, spoolFilename);
@@ -757,6 +784,7 @@ async function createCaptureSpoolSession(mimeType: string | null | undefined) {
     spoolPath,
     spoolFilename,
     mimeType: mimeType ?? null,
+    language: normalizeCaptureLanguage(language),
     bytesWritten: 0,
     createdAt: new Date().toISOString(),
     status: "open",
@@ -816,6 +844,7 @@ async function finalizeCaptureSpoolSession(sessionId: string) {
     spoolPath: captureSpoolSession.spoolPath,
     mimeType: captureSpoolSession.mimeType,
     size: captureSpoolSession.bytesWritten,
+    language: captureSpoolSession.language,
     createdAt: captureSpoolSession.createdAt,
     finalizedAt: new Date().toISOString(),
     status: "finalized",
@@ -1043,6 +1072,36 @@ async function retryUploadQueueItem(id: string) {
   });
 }
 
+async function retireReadyUploadQueueItemsBeforeNewCapture() {
+  return queueCaptureSpoolManifestOperation(async () => {
+    const manifest = await selfHealCaptureSpoolManifest(await readCaptureSpoolManifestFile());
+    const retiredSpoolPaths: string[] = [];
+
+    manifest.items = manifest.items.map((item) => {
+      if (item.uploadStatus !== "ready") {
+        return item;
+      }
+
+      retiredSpoolPaths.push(item.spoolPath);
+      return {
+        ...item,
+        uploadStatus: "failed",
+        lastUploadError:
+          "Retired before a newer capture started to avoid uploading stale audio.",
+      };
+    });
+
+    if (retiredSpoolPaths.length > 0) {
+      await writeCaptureSpoolManifestFile(manifest);
+      await Promise.all(
+        retiredSpoolPaths.map((spoolPath) => rm(spoolPath, { force: true }).catch(() => undefined)),
+      );
+    }
+
+    return { retiredCount: retiredSpoolPaths.length };
+  });
+}
+
 async function releaseStaleUploadingQueueItems(olderThanMs: number) {
   return queueCaptureSpoolManifestOperation(async () => {
     const manifest = await selfHealCaptureSpoolManifest(await readCaptureSpoolManifestFile());
@@ -1102,6 +1161,7 @@ async function runNextForegroundUpload(
 
   try {
     const spoolBytes = await readFile(queueItem.spoolPath);
+    const selectedLanguage = normalizeCaptureLanguage(credentials.language) ?? queueItem.language;
     const meetingId = await createMeetingForForegroundUpload(credentials, queueItem.spoolFilename);
     const audioStorageRef = await uploadForegroundCaptureToStorage(
       credentials,
@@ -1110,7 +1170,10 @@ async function runNextForegroundUpload(
       meetingId,
     );
     const sessionId = await createForegroundUploadSession(
-      credentials,
+      {
+        ...credentials,
+        language: selectedLanguage ?? undefined,
+      },
       meetingId,
       audioStorageRef,
     );
@@ -1310,11 +1373,12 @@ ipcMain.handle(
     event,
     payload: {
       mimeType: string | null;
+      language?: string;
     },
   ) => {
     assertTrustedIpcSender(event);
 
-    const captureSpoolSession = await createCaptureSpoolSession(payload.mimeType);
+    const captureSpoolSession = await createCaptureSpoolSession(payload.mimeType, payload.language);
 
     return {
       sessionId: captureSpoolSession.sessionId,
@@ -1322,6 +1386,7 @@ ipcMain.handle(
       spoolFilename: captureSpoolSession.spoolFilename,
       mimeType: captureSpoolSession.mimeType,
       size: captureSpoolSession.bytesWritten,
+      language: captureSpoolSession.language,
       spooled: false,
     };
   },

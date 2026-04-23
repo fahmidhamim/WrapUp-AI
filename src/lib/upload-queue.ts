@@ -39,6 +39,12 @@ export interface RunNextForegroundUploadResult {
   sessionId: string | null;
 }
 
+export interface RunNextForegroundUploadOptions {
+  language?: string;
+  meetingTitle?: string;
+  source?: string;
+}
+
 export interface ReleaseStaleUploadingQueueItemsResult {
   releasedCount: number;
   releasedIds: string[];
@@ -56,8 +62,10 @@ export async function claimNextUploadQueueItem(): Promise<UploadQueueItem | null
   return getUploadQueueApi()?.claimNextUploadQueueItem?.() ?? null;
 }
 
-export async function runNextForegroundUpload(): Promise<RunNextForegroundUploadResult> {
-  const uploadResult = await (getUploadQueueApi()?.runNextForegroundUpload?.() ?? Promise.resolve({
+export async function runNextForegroundUpload(
+  options?: RunNextForegroundUploadOptions,
+): Promise<RunNextForegroundUploadResult> {
+  const uploadResult = await (getUploadQueueApi()?.runNextForegroundUpload?.(options) ?? Promise.resolve({
     itemId: null,
     outcome: "failed" as const,
     spoolFilename: null,

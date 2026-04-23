@@ -3,6 +3,7 @@ export type DesktopCaptureStatus = "idle" | "starting" | "recording" | "stopping
 export interface DesktopCaptureOptions {
   captureMicrophone: boolean;
   captureSystemAudio: boolean;
+  language?: string;
 }
 
 export interface DesktopCaptureState {
@@ -54,6 +55,14 @@ export async function startDesktopCapture(options: DesktopCaptureOptions) {
   }
 
   return captureApi.startCapture(options);
+}
+
+export function setDesktopCaptureMicMuted(muted: boolean): { applied: boolean; muted: boolean } {
+  const captureApi = getCaptureApi();
+  if (!captureApi?.setCaptureMicMuted) {
+    return { applied: false, muted };
+  }
+  return captureApi.setCaptureMicMuted(muted);
 }
 
 export async function stopDesktopCapture(): Promise<DesktopCaptureStopResult> {
