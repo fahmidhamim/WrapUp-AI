@@ -135,8 +135,10 @@ class Settings(BaseSettings):
     video_audio_extraction_enabled: bool = True
     # Target audio codec for extraction (aac is fast, opus is smaller).
     video_audio_codec: str = "libopus"
-    # Target audio bitrate for extraction.
-    video_audio_bitrate: str = "64k"
+    # Target audio bitrate for extraction. 128k gives clean speech for
+    # non-Latin scripts (Bengali/Hindi/Arabic phonetics need more headroom
+    # than English); 64k was too aggressive and shaved phonemes.
+    video_audio_bitrate: str = "128k"
 
     # ------------------------------------------------------------------
     # S3-compatible object storage (Cloudflare R2 or Backblaze B2)
