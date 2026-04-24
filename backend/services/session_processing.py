@@ -663,6 +663,72 @@ class SessionProcessingService:
                             transcription.transcript_text, transcription.segments,
                         ),
                     )
+
+                    # Confidence-based tie-break: for a locked non-English
+                    # target, if Groq's output looks weak (low avg word
+                    # confidence OR the transcript ended up in the wrong
+                    # language) AND faster-whisper is available locally,
+                    # ALSO run it and let _pick_best_transcript choose.
+                    # Skipped silently if WHISPER_FALLBACK_ENABLED=false.
+                    tiebreak_eligible = (
+                        target_non_english
+                        and self.whisper_service is not None
+                        and self.db.settings.whisper_fallback_enabled
+                        and self.whisper_service.is_available()
+                        and self._has_transcript_content(
+                            transcription.transcript_text, transcription.segments,
+                        )
+                    )
+                    if tiebreak_eligible:
+                        groq_conf = self._deepgram_word_confidence(whisper_result)
+                        groq_text = (whisper_result.transcript_text or "").strip()
+                        groq_lang_ok = True
+                        if (
+                            language_locked and locked_lang and locked_lang != "und"
+                            and len(groq_text) >= 10
+                        ):
+                            consensus = detect_language_consensus(groq_text)
+                            groq_lang_ok = (
+                                normalize_language_code(consensus.language) == locked_lang
+                            )
+                        groq_low_conf = groq_conf < 0.6
+                        if groq_low_conf or not groq_lang_ok:
+                            local_whisper_attempted = True
+                            try:
+                                await progress_callback(
+                                    40,
+                                    "Tie-break: also running local faster-whisper",
+                                )
+                                logger.info(
+                                    "local_whisper_tiebreak_start",
+                                    session_id=session_id,
+                                    groq_confidence=round(groq_conf, 4),
+                                    groq_lang_ok=groq_lang_ok,
+                                    locked_language=locked_lang,
+                                )
+                                local_result = await self._run_whisper(
+                                    media_url=media_url,
+                                    audio_file_url=audio_file_url,
+                                    language=whisper_language_hint,
+                                )
+                                transcription = self._pick_best_transcript(
+                                    transcription,
+                                    local_result,
+                                    locked_language=session_language if language_locked else None,
+                                )
+                                logger.info(
+                                    "local_whisper_tiebreak_complete",
+                                    session_id=session_id,
+                                    chosen=("local_whisper" if transcription is local_result else "groq_whisper"),
+                                )
+                            except Exception as tb_exc:
+                                local_whisper_failed = True
+                                logger.warning(
+                                    "local_whisper_tiebreak_failed",
+                                    session_id=session_id,
+                                    error=str(tb_exc),
+                                    error_type=type(tb_exc).__name__,
+                                )
                 except Exception as exc:
                     groq_failed = True
                     # Log full context so the Oracle journal shows exactly why
@@ -692,6 +758,7 @@ class SessionProcessingService:
                             whisper_result = await self._run_whisper(
                                 media_url=media_url,
                                 audio_file_url=audio_file_url,
+                                language=whisper_language_hint,
                             )
                             if deepgram_empty or deepgram_failed:
                                 transcription = whisper_result
@@ -845,6 +912,7 @@ class SessionProcessingService:
         *,
         media_url: str,
         audio_file_url: str,
+        language: str | None = None,
     ) -> TranscriptionResult:
         """Download audio, optionally preprocess, run Whisper."""
         import httpx
@@ -878,7 +946,9 @@ class SessionProcessingService:
                     logger.warning("audio_preprocessing_failed", error=str(exc))
 
             whisper_input = preprocessed_path if preprocessed_path is not None else raw_path
-            result = await self.whisper_service.transcribe_file(whisper_input)  # type: ignore[union-attr]
+            result = await self.whisper_service.transcribe_file(  # type: ignore[union-attr]
+                whisper_input, language=language,
+            )
         finally:
             try:
                 os.unlink(raw_path)

@@ -43,23 +43,37 @@ class WhisperTranscriptionService:
         except ImportError:
             return False
 
-    async def transcribe_file(self, audio_path: Path) -> TranscriptionResult:
-        """Transcribe a local audio file (non-blocking — runs in executor)."""
+    async def transcribe_file(
+        self,
+        audio_path: Path,
+        *,
+        language: str | None = None,
+    ) -> TranscriptionResult:
+        """Transcribe a local audio file (non-blocking — runs in executor).
+
+        Pass `language` (ISO 639-1, e.g. "bn") to skip Whisper's auto-detect
+        step and force the decoder to decode in that language. Critical for
+        Bengali/Hindi/Arabic where auto-detect frequently picks the wrong
+        script on short or accented clips.
+        """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._transcribe_sync, audio_path)
+        return await loop.run_in_executor(
+            None, self._transcribe_sync, audio_path, language,
+        )
 
     async def transcribe_bytes(
         self,
         audio_bytes: bytes,
         *,
         suffix: str = ".wav",
+        language: str | None = None,
     ) -> TranscriptionResult:
         """Write bytes to a temp file and transcribe."""
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = Path(tmp.name)
         try:
-            return await self.transcribe_file(tmp_path)
+            return await self.transcribe_file(tmp_path, language=language)
         finally:
             try:
                 os.unlink(tmp_path)
@@ -94,16 +108,31 @@ class WhisperTranscriptionService:
         logger.info("whisper_model_loaded", model=model_size)
         return self._model
 
-    def _transcribe_sync(self, audio_path: Path) -> TranscriptionResult:
+    def _transcribe_sync(
+        self,
+        audio_path: Path,
+        language: str | None = None,
+    ) -> TranscriptionResult:
         model = self._load_model()
 
-        logger.info("whisper_transcription_start", path=str(audio_path))
+        # Normalise the hint to the 2-letter code Whisper expects.
+        lang_hint: str | None = None
+        if language:
+            raw = language.lower().split("-")[0]
+            if raw and raw not in ("und", "auto"):
+                lang_hint = raw
+
+        logger.info(
+            "whisper_transcription_start",
+            path=str(audio_path),
+            language_hint=lang_hint,
+        )
 
         segments_iter, info = model.transcribe(
             str(audio_path),
             beam_size=self.settings.whisper_beam_size,
             best_of=self.settings.whisper_best_of,
-            language=None,           # always auto-detect
+            language=lang_hint,      # None → auto-detect; "bn" → forced Bengali
             vad_filter=True,         # skip non-speech frames
             vad_parameters=dict(
                 min_silence_duration_ms=300,
