@@ -79,8 +79,10 @@ class ServiceContainer:
                 reason="faster-whisper not installed or WHISPER_FALLBACK_ENABLED=false",
             )
 
-        # Groq Whisper (primary fallback — fast cloud transcription)
-        if settings.whisper_fallback_enabled and settings.groq_api_key:
+        # Groq Whisper (primary fallback — fast cloud transcription).
+        # Gated only on the API key, independent of `whisper_fallback_enabled`
+        # which controls local faster-whisper (heavy ML deps, server-side).
+        if settings.groq_api_key:
             _log.info(
                 "groq_whisper_fallback_enabled",
                 model=settings.groq_whisper_model,
