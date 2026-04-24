@@ -472,8 +472,11 @@ class SessionProcessingService:
             )
 
         # Hard-fail early if both providers unavailable (config issue, not transient).
+        # Groq Whisper (cloud) is independent of `whisper_fallback_enabled`, which
+        # only gates local faster-whisper (requires heavy ML deps on the server).
+        # Groq is a plain API call — enable it whenever the key is present.
         groq_whisper_enabled = (
-            self.groq_client is not None and self.db.settings.whisper_fallback_enabled
+            self.groq_client is not None and bool(self.db.settings.groq_api_key)
         )
         if deepgram_failed and not groq_whisper_enabled:
             raise RuntimeError(

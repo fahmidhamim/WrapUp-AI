@@ -89,9 +89,11 @@ class Settings(BaseSettings):
     diarization_min_segment_duration: float = 0.3
 
     # ------------------------------------------------------------------
-    # Whisper fallback transcription (faster-whisper, runs locally)
+    # LOCAL Whisper fallback (faster-whisper, runs on the server with
+    # heavy ML deps: ctranslate2 + whisper model). Does NOT gate Groq
+    # Whisper — Groq is a cloud API and is enabled whenever GROQ_API_KEY
+    # is set. Set this to False to disable LOCAL Whisper only.
     # ------------------------------------------------------------------
-    # Set to False to disable Whisper fallback entirely.
     whisper_fallback_enabled: bool = True
     # Whisper model size: tiny / base / small / medium / large-v2 / large-v3
     whisper_model: str = "large-v3"
