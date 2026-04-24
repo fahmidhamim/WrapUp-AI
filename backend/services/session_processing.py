@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 import mimetypes
@@ -127,75 +126,32 @@ class SessionProcessingService:
                 )
 
         # ------------------------------------------------------------------
-        # Transcription with retry loop. Some empty results are transient
-        # (rate limits, network blips, signed-URL hiccups). Retry the full
-        # Deepgram → Groq → local Whisper chain up to MAX_TRANSCRIPTION_ATTEMPTS
-        # times with RETRY_DELAY_SECONDS between attempts before giving up.
+        # Transcription cascade: Deepgram → Groq Whisper → local Whisper.
+        # Single pass per provider, no sleeps between, fail fast. UX wins
+        # over transient-error resilience: users won't wait 30+ seconds.
         # ------------------------------------------------------------------
-        MAX_TRANSCRIPTION_ATTEMPTS = 3
-        RETRY_DELAY_SECONDS = 5
-        transcription: TranscriptionResult | None = None
-        last_diagnostics: dict[str, Any] = {}
+        transcription, diagnostics = await self._run_transcription_chain(
+            session_id=session_id,
+            session_language=session_language,
+            language_locked=language_locked,
+            media_url=media_url,
+            deepgram_media_url=deepgram_media_url,
+            audio_file_url=audio_file_url,
+            extracted_audio_path=extracted_audio_path,
+            use_hybrid=use_hybrid,
+            progress_callback=progress_callback,
+        )
 
-        for attempt in range(1, MAX_TRANSCRIPTION_ATTEMPTS + 1):
-            if attempt > 1:
-                logger.warning(
-                    "transcription_retry_scheduled",
-                    session_id=session_id,
-                    next_attempt=attempt,
-                    max_attempts=MAX_TRANSCRIPTION_ATTEMPTS,
-                    delay_seconds=RETRY_DELAY_SECONDS,
-                    last_diagnostics=last_diagnostics,
-                )
-                await progress_callback(
-                    32,
-                    f"Empty transcript — retry {attempt}/{MAX_TRANSCRIPTION_ATTEMPTS} in {RETRY_DELAY_SECONDS}s",
-                )
-                await asyncio.sleep(RETRY_DELAY_SECONDS)
-
-            transcription, last_diagnostics = await self._run_transcription_chain(
-                session_id=session_id,
-                session_language=session_language,
-                language_locked=language_locked,
-                media_url=media_url,
-                deepgram_media_url=deepgram_media_url,
-                audio_file_url=audio_file_url,
-                extracted_audio_path=extracted_audio_path,
-                use_hybrid=use_hybrid,
-                progress_callback=progress_callback,
-                attempt=attempt,
-            )
-
-            if self._has_transcript_content(transcription.transcript_text, transcription.segments):
-                if attempt > 1:
-                    logger.info(
-                        "transcription_succeeded_on_retry",
-                        session_id=session_id,
-                        attempt=attempt,
-                        language=transcription.language,
-                        segments=len(transcription.segments),
-                    )
-                break
-
-            logger.warning(
-                "transcription_attempt_empty",
-                session_id=session_id,
-                attempt=attempt,
-                diagnostics=last_diagnostics,
-            )
-
-        assert transcription is not None  # loop always assigns
         if not self._has_transcript_content(transcription.transcript_text, transcription.segments):
             groq_hint = (
                 " If 'groq_enabled=False', set GROQ_API_KEY on the server and restart."
-                if not last_diagnostics.get("groq_enabled", True)
+                if not diagnostics.get("groq_enabled", True)
                 else ""
             )
             raise RuntimeError(
-                f"Transcription returned no text after {MAX_TRANSCRIPTION_ATTEMPTS} attempts. "
-                f"Diagnostics: {last_diagnostics}. "
-                f"Likely causes: audio contains no speech, unsupported/corrupt format, or "
-                f"both Deepgram and Groq Whisper are unavailable.{groq_hint}"
+                f"Transcription returned no text. Diagnostics: {diagnostics}. "
+                f"Likely causes: audio contains no speech, unsupported/corrupt format, "
+                f"or all transcription providers returned empty.{groq_hint}"
             )
         # Note: extracted_audio_path cleanup is deferred to after R2 migration so
         # we can upload the small extracted audio instead of the full original video.
@@ -447,23 +403,24 @@ class SessionProcessingService:
         extracted_audio_path: Path | None,
         use_hybrid: bool,
         progress_callback,
-        attempt: int = 1,
     ) -> tuple[TranscriptionResult, dict[str, Any]]:
-        """Run one Deepgram → Groq Whisper → local Whisper chain.
+        """Single-pass Deepgram → Groq Whisper → local Whisper cascade.
 
-        Returns (transcription, diagnostics). Transcription may be empty
-        if all providers returned nothing. Raises only if Deepgram fails
-        AND Groq Whisper is disabled (config problem, not transient).
+        Returns (transcription, diagnostics). No sleeps between providers —
+        user wait time is minimized. If the user pre-selected a language and
+        Deepgram returns valid content in that language, Groq verification is
+        skipped entirely (fast path for Bangla/Hindi/Arabic uploads).
+        Raises only if Deepgram fails AND Groq Whisper is disabled.
         """
-        await progress_callback(30, f"Transcribing with Deepgram (attempt {attempt})")
+        await progress_callback(30, "Transcribing with Deepgram")
         deepgram_language_hint = (
             session_language if session_language and session_language != "und" else None
         )
         logger.info(
             "deepgram_start",
             session_id=session_id,
-            attempt=attempt,
             language_hint=deepgram_language_hint,
+            language_locked=language_locked,
             media_source="extracted_audio" if extracted_audio_path is not None else "url",
         )
 
@@ -488,7 +445,6 @@ class SessionProcessingService:
             logger.exception(
                 "deepgram_exhausted_falling_back",
                 session_id=session_id,
-                attempt=attempt,
                 error=str(dg_exc),
             )
             deepgram_failed = True
@@ -509,48 +465,13 @@ class SessionProcessingService:
             logger.info(
                 "deepgram_result",
                 session_id=session_id,
-                attempt=attempt,
                 empty=deepgram_empty,
                 detected_language=transcription.language,
                 segment_count=len(transcription.segments),
                 transcript_chars=len(transcription.transcript_text or ""),
             )
 
-        if deepgram_empty and not deepgram_failed:
-            logger.warning(
-                "empty_transcription_inner_retrying",
-                session_id=session_id,
-                attempt=attempt,
-            )
-            try:
-                if extracted_audio_path is not None:
-                    audio_bytes = extracted_audio_path.read_bytes()
-                    transcription = await self.transcription_service.transcribe_audio(
-                        audio_bytes,
-                        mime_type="audio/ogg",
-                        diarize=not use_hybrid,
-                        language=deepgram_language_hint,
-                    )
-                else:
-                    transcription = await self.transcription_service.transcribe_url(
-                        media_url=deepgram_media_url,
-                        diarize=not use_hybrid,
-                        language=deepgram_language_hint,
-                    )
-                deepgram_empty = not self._has_transcript_content(
-                    transcription.transcript_text, transcription.segments,
-                )
-            except Exception as dg_exc:
-                logger.exception(
-                    "deepgram_retry_failed_falling_back",
-                    session_id=session_id,
-                    attempt=attempt,
-                    error=str(dg_exc),
-                )
-                deepgram_failed = True
-                deepgram_empty = True
-
-        # Hard-fail if both providers unavailable (config issue, not transient)
+        # Hard-fail early if both providers unavailable (config issue, not transient).
         groq_whisper_enabled = (
             self.groq_client is not None and self.db.settings.whisper_fallback_enabled
         )
@@ -563,6 +484,7 @@ class SessionProcessingService:
 
         groq_attempted = False
         groq_failed = False
+        groq_skipped_fast_path = False
         local_whisper_attempted = False
         local_whisper_failed = False
 
@@ -570,38 +492,55 @@ class SessionProcessingService:
             dg_confidence = self._deepgram_word_confidence(transcription)
             threshold = self.db.settings.whisper_confidence_threshold
             dg_lang = normalize_language_code(transcription.language)
-            non_english = dg_lang not in ("en", "und")
-            need_groq_whisper = deepgram_empty or dg_confidence < threshold or non_english
+            locked_lang = normalize_language_code(session_language) if language_locked else None
 
-            if not deepgram_empty:
+            # Decide whether to spend extra time running Groq Whisper.
+            # Priority: UX speed. Skip Groq whenever Deepgram gave us a good
+            # answer in the expected language.
+            need_groq_whisper = False
+            reason = ""
+            if deepgram_failed or deepgram_empty:
+                need_groq_whisper = True
+                reason = "Deepgram failed/empty"
+            elif language_locked and locked_lang and locked_lang != "und" and locked_lang != dg_lang:
+                # User picked a language but Deepgram heard a different one —
+                # verify rather than trust a possibly-wrong transcript.
+                need_groq_whisper = True
+                reason = f"language mismatch (locked={locked_lang}, detected={dg_lang})"
+            elif not language_locked and dg_lang not in ("en", "und"):
+                # No user lock + non-English auto-detect: Deepgram can misidentify
+                # Bengali as Hindi etc. — verify with Groq as a safety net.
+                need_groq_whisper = True
+                reason = f"non-English auto-detected ({dg_lang}) — verifying"
+            elif dg_confidence < threshold:
+                need_groq_whisper = True
+                reason = f"low Deepgram confidence ({dg_confidence:.2f} < {threshold:.2f})"
+            else:
+                groq_skipped_fast_path = True
                 logger.info(
-                    "deepgram_word_confidence",
+                    "groq_whisper_skipped_fast_path",
                     session_id=session_id,
-                    attempt=attempt,
-                    confidence=round(dg_confidence, 4),
-                    threshold=threshold,
                     detected_language=dg_lang,
-                    non_english_comparison=non_english,
+                    locked_language=locked_lang,
+                    confidence=round(dg_confidence, 4),
                 )
 
             if need_groq_whisper:
                 groq_attempted = True
-                if deepgram_empty:
-                    reason = "empty Deepgram result"
-                elif non_english:
-                    reason = f"non-English language detected ({dg_lang}) — verifying with Whisper"
-                else:
-                    reason = "low Deepgram confidence"
-                await progress_callback(38, f"Running Groq Whisper fallback ({reason})")
+                await progress_callback(38, f"Groq Whisper fallback ({reason})")
 
-                if non_english and not (session_language and session_language != "und"):
+                # Language hint for Groq:
+                # - user locked a language → use it
+                # - non-English with no lock → let Groq auto-detect
+                # - otherwise → inherited helper
+                if language_locked and locked_lang and locked_lang != "und":
+                    whisper_language_hint = locked_lang
+                elif dg_lang not in ("en", "und") and not (session_language and session_language != "und"):
                     whisper_language_hint = None
                     logger.info(
                         "groq_whisper_no_hint_non_english",
                         session_id=session_id,
-                        attempt=attempt,
                         deepgram_detected=dg_lang,
-                        reason="letting Whisper auto-detect to avoid language confusion",
                     )
                 else:
                     whisper_language_hint = self._determine_language_hint(
@@ -612,11 +551,15 @@ class SessionProcessingService:
                     logger.info(
                         "groq_whisper_language_hint",
                         session_id=session_id,
-                        attempt=attempt,
                         hint=whisper_language_hint,
                     )
 
-                groq_model = "whisper-large-v3" if non_english else None
+                # whisper-large-v3 for any non-English target; turbo otherwise.
+                target_non_english = (
+                    (locked_lang not in (None, "en", "und"))
+                    or (dg_lang not in ("en", "und"))
+                )
+                groq_model = "whisper-large-v3" if target_non_english else None
 
                 try:
                     whisper_result = await self._run_groq_whisper(
@@ -626,7 +569,7 @@ class SessionProcessingService:
                         language=whisper_language_hint,
                         model=groq_model,
                     )
-                    if deepgram_empty:
+                    if deepgram_empty or deepgram_failed:
                         transcription = whisper_result
                     else:
                         transcription = self._pick_best_transcript(
@@ -637,7 +580,6 @@ class SessionProcessingService:
                     logger.info(
                         "groq_whisper_fallback_complete",
                         session_id=session_id,
-                        attempt=attempt,
                         reason=reason,
                         chosen=("groq_whisper" if transcription is whisper_result else "deepgram"),
                         has_text=self._has_transcript_content(
@@ -649,7 +591,6 @@ class SessionProcessingService:
                     logger.warning(
                         "groq_whisper_fallback_failed",
                         session_id=session_id,
-                        attempt=attempt,
                         error=str(exc),
                     )
                     if (
@@ -658,12 +599,12 @@ class SessionProcessingService:
                     ):
                         local_whisper_attempted = True
                         try:
-                            await progress_callback(39, "Groq Whisper failed — trying local Whisper")
+                            await progress_callback(39, "Groq failed — trying local Whisper")
                             whisper_result = await self._run_whisper(
                                 media_url=media_url,
                                 audio_file_url=audio_file_url,
                             )
-                            if deepgram_empty:
+                            if deepgram_empty or deepgram_failed:
                                 transcription = whisper_result
                             else:
                                 transcription = self._pick_best_transcript(
@@ -676,17 +617,16 @@ class SessionProcessingService:
                             logger.warning(
                                 "local_whisper_fallback_also_failed",
                                 session_id=session_id,
-                                attempt=attempt,
                                 error=str(local_exc),
                             )
 
         diagnostics: dict[str, Any] = {
-            "attempt": attempt,
             "deepgram_failed": deepgram_failed,
             "deepgram_empty": deepgram_empty,
             "detected_language": transcription.language,
             "groq_enabled": groq_whisper_enabled,
             "groq_attempted": groq_attempted,
+            "groq_skipped_fast_path": groq_skipped_fast_path,
             "groq_failed": groq_failed,
             "local_whisper_attempted": local_whisper_attempted,
             "local_whisper_failed": local_whisper_failed,
