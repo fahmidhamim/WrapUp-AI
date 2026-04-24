@@ -186,7 +186,7 @@ async def convert_to_wav_16k(audio_path: Path) -> Path:
 
 
 def _convert_wav_sync(audio_path: Path) -> Path:
-    fd, out_path = tempfile.mkstemp(suffix=".wav")
+    fd, out_path = tempfile.mkstemp(suffix=".ogg")
     os.close(fd)
     cmd = [
         "ffmpeg", "-y",
@@ -194,7 +194,8 @@ def _convert_wav_sync(audio_path: Path) -> Path:
         "-vn",
         "-ac", "1",
         "-ar", "16000",
-        "-c:a", "pcm_s16le",
+        "-c:a", "libopus",
+        "-b:a", "64k",
         out_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
