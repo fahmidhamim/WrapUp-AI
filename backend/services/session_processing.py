@@ -591,13 +591,25 @@ class SessionProcessingService:
                     )
                 except Exception as exc:
                     groq_failed = True
+                    # Log full context so the Oracle journal shows exactly why
+                    # Groq died (timeout, 4xx, network) — essential for the
+                    # slow-Vercel vs fast-local divergence.
                     logger.warning(
                         "groq_whisper_fallback_failed",
                         session_id=session_id,
                         error=str(exc),
+                        error_type=type(exc).__name__,
+                        has_extracted_audio=extracted_audio_path is not None,
                     )
+                    # Only attempt local Whisper when BOTH the library is
+                    # importable AND the user has explicitly opted in via
+                    # WHISPER_FALLBACK_ENABLED=true. On servers without
+                    # ML deps this avoids the 10-minute dead-end the user
+                    # observed on Oracle (faster-whisper was installed but
+                    # the flag was false — intent was "don't use it").
                     if (
                         self.whisper_service is not None
+                        and self.db.settings.whisper_fallback_enabled
                         and self.whisper_service.is_available()
                     ):
                         local_whisper_attempted = True
