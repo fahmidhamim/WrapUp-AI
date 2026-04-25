@@ -842,7 +842,19 @@ export default function InstantMeetingPage() {
                   onClick={() => {
                     setIsMuted((previouslyMuted) => {
                       const nextMuted = !previouslyMuted;
+                      // Two recording paths share this button:
+                      //   - Electron native desktop capture
+                      //   - Web WebSocket live streaming (liveStreamRef)
+                      // Mute both. For the WS path, flipping `track.enabled`
+                      // makes the browser emit silence frames so the worklet
+                      // keeps its rhythm but Deepgram receives no speech.
                       setDesktopCaptureMicMuted(nextMuted);
+                      const stream = liveStreamRef.current;
+                      if (stream) {
+                        for (const track of stream.getAudioTracks()) {
+                          track.enabled = !nextMuted;
+                        }
+                      }
                       return nextMuted;
                     });
                   }}
