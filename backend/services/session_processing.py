@@ -667,64 +667,6 @@ class SessionProcessingService:
                         ),
                     )
 
-                    # Always-on tie-break for locked non-English: faster-whisper
-                    # is run unconditionally as a second opinion, and
-                    # _pick_best_transcript picks the better result. We
-                    # deliberately do NOT gate on Groq confidence — Whisper
-                    # models are overconfident on their own decoding (per-word
-                    # probability stays high even when hallucinating) so that
-                    # gate almost never fired.
-                    #
-                    # Cost: one extra CPU run on Oracle per non-English upload
-                    # (~5-10 min on a 2-min clip with int8 large-v3). Toggle
-                    # off via WHISPER_FALLBACK_ENABLED=false on the server.
-                    tiebreak_eligible = (
-                        target_non_english
-                        and self.whisper_service is not None
-                        and self.db.settings.whisper_fallback_enabled
-                        and self.whisper_service.is_available()
-                        and self._has_transcript_content(
-                            transcription.transcript_text, transcription.segments,
-                        )
-                    )
-                    if tiebreak_eligible:
-                        local_whisper_attempted = True
-                        try:
-                            await progress_callback(
-                                40,
-                                "Tie-break: running local faster-whisper for accuracy",
-                            )
-                            logger.info(
-                                "local_whisper_tiebreak_start",
-                                session_id=session_id,
-                                locked_language=locked_lang,
-                                hint=whisper_language_hint,
-                            )
-                            local_result = await self._run_whisper(
-                                media_url=media_url,
-                                audio_file_url=audio_file_url,
-                                language=whisper_language_hint,
-                            )
-                            transcription = self._pick_best_transcript(
-                                transcription,
-                                local_result,
-                                locked_language=session_language if language_locked else None,
-                            )
-                            logger.info(
-                                "local_whisper_tiebreak_complete",
-                                session_id=session_id,
-                                chosen=(
-                                    "local_whisper" if transcription is local_result else "groq_whisper"
-                                ),
-                            )
-                        except Exception as tb_exc:
-                            local_whisper_failed = True
-                            logger.warning(
-                                "local_whisper_tiebreak_failed",
-                                session_id=session_id,
-                                error=str(tb_exc),
-                                error_type=type(tb_exc).__name__,
-                            )
                 except Exception as exc:
                     groq_failed = True
                     # Log full context so the Oracle journal shows exactly why
