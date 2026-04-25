@@ -181,6 +181,10 @@ export default function InstantMeetingPage() {
   const liveDoneResolveRef = useRef<((transcript: string) => void) | null>(null);
   const [liveFinals, setLiveFinals] = useState<{ speaker: number | null; text: string }[]>([]);
   const [liveInterim, setLiveInterim] = useState<string>("");
+  // Reflects what the browser actually agreed to do for auto-gain-control
+  // on this stream. Surfaced in the Live Transcript panel so the user can
+  // verify the constraint took effect without opening DevTools.
+  const [micAgcEnabled, setMicAgcEnabled] = useState<boolean | null>(null);
 
   const { user } = useAuth();
   const { createMeeting } = useMeetings();
@@ -436,6 +440,25 @@ export default function InstantMeetingPage() {
         video: false,
       });
       liveStreamRef.current = stream;
+
+      // Read what the browser actually agreed to. If the track came back
+      // with autoGainControl still true, surface that in the UI — that's
+      // what was dragging the macOS hardware input level down.
+      try {
+        const track = stream.getAudioTracks()[0];
+        const settings = track?.getSettings?.() as MediaTrackSettings | undefined;
+        const agc = settings?.autoGainControl;
+        setMicAgcEnabled(typeof agc === "boolean" ? agc : null);
+        if (agc === true) {
+          // Some Chromium builds ignore autoGainControl:false on first
+          // get. Try again at runtime — rare but worth one shot.
+          try {
+            await track?.applyConstraints?.({ autoGainControl: false } as MediaTrackConstraints);
+            const after = track?.getSettings?.()?.autoGainControl;
+            setMicAgcEnabled(typeof after === "boolean" ? after : null);
+          } catch { /* ignore */ }
+        }
+      } catch { /* ignore */ }
 
       const AudioCtx: typeof AudioContext =
         (window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
@@ -923,6 +946,7 @@ export default function InstantMeetingPage() {
                   finals={liveFinals}
                   interim={liveInterim}
                   language={language}
+                  micAgcEnabled={micAgcEnabled}
                 />
               )}
               {activeTab === "transcript" && !webRecording && (
@@ -1130,18 +1154,45 @@ function LiveTranscriptPanel({
   finals,
   interim,
   language,
+  micAgcEnabled,
 }: {
   finals: { speaker: number | null; text: string }[];
   interim: string;
   language: string;
+  micAgcEnabled: boolean | null;
 }) {
   return (
     <div className="flex flex-col gap-3 text-sm">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground flex-wrap">
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
         <span>Live transcription</span>
         {language && <span className="text-muted-foreground/70">• {language.toUpperCase()}</span>}
+        {micAgcEnabled === false && (
+          <span
+            className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/30"
+            title="Browser is not auto-adjusting your input level."
+          >
+            AGC OFF
+          </span>
+        )}
+        {micAgcEnabled === true && (
+          <span
+            className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-500/30"
+            title="Browser still applies auto-gain on this stream."
+          >
+            AGC ON
+          </span>
+        )}
       </div>
+      {micAgcEnabled === false && (
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          If your macOS Sound input level still drops while you talk, that&apos;s
+          macOS itself adjusting the slider, not the app. Open
+          <span className="font-medium"> System Settings → Sound → Input</span> and
+          uncheck <span className="font-medium">&quot;Ambient noise reduction&quot;</span> if it&apos;s
+          shown for your microphone.
+        </p>
+      )}
       <div className="leading-relaxed text-foreground/90 space-y-2">
         {finals.length === 0 && !interim && (
           <div className="italic text-muted-foreground">
