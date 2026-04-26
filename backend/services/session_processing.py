@@ -216,11 +216,20 @@ class SessionProcessingService:
                     session_id=session_id,
                     error=str(exc),
                 )
-                # Graceful fallback: re-transcribe with Deepgram diarization
+                # Graceful fallback: re-transcribe with Deepgram diarization.
+                # MUST pass the user-selected language — otherwise the recovery
+                # call defaults to language-detection, which on non-English
+                # audio returns `und` → triggers the 4-language scoring loop
+                # → final pick = English (because English wins ties). This
+                # was wiping out user-selected Bangla/Hindi/Arabic uploads.
+                fallback_language = (
+                    session_language if session_language and session_language != "und" else None
+                )
                 try:
                     transcription = await self.transcription_service.transcribe_url(
                         media_url=media_url,
                         diarize=True,
+                        language=fallback_language,
                     )
                 except Exception as retry_exc:
                     logger.warning(
