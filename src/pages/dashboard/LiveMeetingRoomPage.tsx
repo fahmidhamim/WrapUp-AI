@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import wrapupLogo from "@/assets/logo-wrapup.png";
 import {
   Mic,
   MicOff,
@@ -391,19 +392,17 @@ export default function LiveMeetingRoomPage() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span
+            <img
+              src={wrapupLogo}
+              alt="WrapUp"
               onClick={() => navigate("/dashboard")}
-              className="gradient-text"
               style={{
-                fontSize: 18,
-                fontWeight: 700,
-                letterSpacing: "-0.01em",
+                height: 28,
+                width: "auto",
                 cursor: "pointer",
-                lineHeight: 1,
+                display: "block",
               }}
-            >
-              WrapUp
-            </span>
+            />
             <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.1)" }} />
             <span style={{ fontSize: 14, color: "white", fontWeight: 500 }}>Team Standup</span>
             <div

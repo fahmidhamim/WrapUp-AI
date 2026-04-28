@@ -57,6 +57,7 @@ function ChatbotGuard() {
   const hidden =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/meeting-room") ||
+    pathname.startsWith("/join-meeting") ||
     pathname === "/login" ||
     pathname === "/signup" ||
     pathname === "/pricing" ||
