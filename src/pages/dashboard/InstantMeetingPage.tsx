@@ -43,6 +43,68 @@ import { useQueryClient } from "@tanstack/react-query";
 
 type InsightTab = "transcript" | "actions" | "analytics" | "askai" | "notes";
 
+type WsOpenError = Error & { code?: number };
+
+// Map backend WebSocket close codes to user-readable reasons. Anything not
+// listed here falls through to "code N: <reason>".
+const WS_CLOSE_REASONS: Record<number, string> = {
+  4401: "session expired — please refresh and sign in again",
+  4404: "session not found — try again in a moment",
+  4500: "live transcription not configured on the server",
+};
+
+// Open the live-transcription WebSocket once. Refreshes the Supabase access
+// token immediately before connecting so a stale JWT can't cause 4401, and
+// surfaces the close code on rejection so the caller can decide whether to
+// retry and what to show the user.
+async function openLiveWs(sessionId: string, language: string): Promise<WebSocket> {
+  // getSession() auto-refreshes if the cached token is expired, so this is
+  // the cheapest way to guarantee we hand the backend a live JWT.
+  const { data: authData } = await supabase.auth.getSession();
+  const accessToken = authData.session?.access_token;
+  if (!accessToken) throw new Error("Authentication session missing.");
+
+  const wsUrl =
+    `${resolveWebSocketUrl(`/ws/live-transcription/${sessionId}`)}` +
+    `?lang=${encodeURIComponent(language)}` +
+    `&token=${encodeURIComponent(accessToken)}`;
+  const ws = new WebSocket(wsUrl);
+  ws.binaryType = "arraybuffer";
+
+  return new Promise<WebSocket>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      fn();
+    };
+    const timeout = window.setTimeout(() => {
+      finish(() => {
+        try { ws.close(); } catch { /* ignore */ }
+        reject(Object.assign(new Error("connect timed out after 10s"), { code: -1 } as WsOpenError));
+      });
+    }, 10_000);
+
+    ws.onopen = () => finish(() => resolve(ws));
+    ws.onclose = (evt) => {
+      finish(() => {
+        const detail = WS_CLOSE_REASONS[evt.code]
+          ?? `close ${evt.code}${evt.reason ? `: ${evt.reason}` : ""}`;
+        reject(Object.assign(new Error(detail), { code: evt.code } as WsOpenError));
+      });
+    };
+    // onerror without an accompanying close is rare but possible (DNS, mixed
+    // content, CORS). Give onclose ~400ms to fire first since it carries the
+    // close code; otherwise treat onerror as terminal.
+    ws.onerror = () => {
+      window.setTimeout(() => {
+        finish(() => reject(Object.assign(new Error("transport error (no close frame)"), { code: -2 } as WsOpenError)));
+      }, 400);
+    };
+  });
+}
+
 const TABS: { id: InsightTab; label: string }[] = [
   { id: "transcript", label: "Transcript" },
   { id: "actions", label: "Actions" },
@@ -588,19 +650,20 @@ export default function InstantMeetingPage() {
 
       // 2) Open the WebSocket BEFORE starting the mic — if the server is
       //    unreachable we surface that error before touching the user's mic.
-      const wsUrl =
-        `${resolveWebSocketUrl(`/ws/live-transcription/${sessionId}`)}` +
-        `?lang=${encodeURIComponent(language)}` +
-        `&token=${encodeURIComponent(accessToken)}`;
-      const ws = new WebSocket(wsUrl);
-      ws.binaryType = "arraybuffer";
+      //    Try once, and on a transient failure retry once with a fresh
+      //    token. 4500 (server misconfigured) is terminal; everything else
+      //    — stale JWT (4401), session-row race (4404), tunnel hiccups,
+      //    transport errors — is worth a single retry.
+      let ws: WebSocket;
+      try {
+        ws = await openLiveWs(sessionId, language);
+      } catch (firstErr) {
+        const code = (firstErr as WsOpenError).code;
+        if (code === 4500) throw firstErr;
+        await new Promise((r) => window.setTimeout(r, 600));
+        ws = await openLiveWs(sessionId, language);
+      }
       liveWsRef.current = ws;
-
-      await new Promise<void>((resolve, reject) => {
-        const timeout = window.setTimeout(() => reject(new Error("WebSocket connect timed out")), 10_000);
-        ws.onopen = () => { window.clearTimeout(timeout); resolve(); };
-        ws.onerror = () => { window.clearTimeout(timeout); reject(new Error("WebSocket failed to open")); };
-      });
 
       ws.onmessage = (evt) => {
         try {
@@ -752,11 +815,11 @@ export default function InstantMeetingPage() {
       toast.success("Live transcription started.");
     } catch (err) {
       console.error("startWebRecording (streaming) failed:", err);
-      // Single user-visible message regardless of which step failed; the
-      // detailed reason is in the console for debugging. We don't want a
-      // standalone "instant" page surface — bounce the user back to New
-      // Meeting with a toast and let them retry from there.
-      toast.error("WebSocket failed to open");
+      // Surface the actual reason in the toast so the user (and bug reports)
+      // can tell auth-expiry from server-down from network blips. The full
+      // error stays in the console.
+      const reason = err instanceof Error ? err.message : "unknown error";
+      toast.error(`Recording couldn't start: ${reason}`);
       teardownLiveStreaming();
       setAutoStarting(false);
       navigate("/dashboard/new-meeting", { replace: true });
