@@ -2,11 +2,11 @@ import type { SubscriptionTier } from "./subscription";
 
 export const STRIPE_TIERS = {
   plus: {
-    price_id: "price_1TLn8lFeOJEhyHTsFEaqKdDn",
+    price_id: "price_1TR8LEFeOJEhyHTsQnMg4Kn4",
     product_id: "prod_UKS29aq6k17Xr8",
   },
   business: {
-    price_id: "price_1TLnS7FeOJEhyHTsGZvKhi7r",
+    price_id: "price_1TR8HBFeOJEhyHTs8Dfl3qUd",
     product_id: "prod_UKSMdrzwwqOx3y",
   },
 } as const;
