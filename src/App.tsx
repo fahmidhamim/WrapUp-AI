@@ -35,6 +35,7 @@ import MeetingDetailPage from "./pages/dashboard/MeetingDetailPage";
 import UploadPage from "./pages/dashboard/UploadPage";
 import NewMeetingPage from "./pages/dashboard/NewMeetingPage";
 import JoinMeetingPage from "./pages/dashboard/JoinMeetingPage";
+import LiveMeetingRoomPage from "./pages/dashboard/LiveMeetingRoomPage";
 import InstantMeetingPage from "./pages/dashboard/InstantMeetingPage";
 import ScheduleMeetingPage from "./pages/dashboard/ScheduleMeetingPage";
 import CalendarPage from "./pages/dashboard/CalendarPage";
@@ -167,8 +168,8 @@ const App = () => (
           <Route path="/dashboard/meetings/:id" element={<DashboardLayout><MeetingDetailPage /></DashboardLayout>} />
           <Route path="/dashboard/upload" element={<Navigate to="/dashboard/new-meeting" replace />} />
           <Route path="/dashboard/new-meeting" element={<DashboardLayout><NewMeetingPage /></DashboardLayout>} />
-          <Route path="/dashboard/join" element={<DashboardLayout><JoinMeetingPage /></DashboardLayout>} />
-          <Route path="/dashboard/join/:id" element={<DashboardLayout><JoinMeetingPage /></DashboardLayout>} />
+          <Route path="/join-meeting" element={<DashboardLayout><JoinMeetingPage /></DashboardLayout>} />
+          <Route path="/meeting-room/:meetingId" element={<LiveMeetingRoomPage />} />
           <Route path="/dashboard/instant" element={<DashboardLayout><InstantMeetingPage /></DashboardLayout>} />
           <Route path="/dashboard/schedule" element={<DashboardLayout><ScheduleMeetingPage /></DashboardLayout>} />
           <Route path="/dashboard/calendar" element={<DashboardLayout><CalendarPage /></DashboardLayout>} />
