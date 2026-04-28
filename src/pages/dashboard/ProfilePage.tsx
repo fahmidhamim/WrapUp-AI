@@ -275,7 +275,7 @@ export default function ProfilePage() {
             </div>
 
             <div className="border-t border-border pt-4">
-              <p className="text-sm font-medium mb-2">Upgrade to Plus — $5/mo</p>
+              <p className="text-sm font-medium mb-2">Upgrade to Plus — $4.99/mo</p>
               <ul className="space-y-1.5 mb-4">
                 {tierFeatures.plus.map((f) => (
                   <li key={f} className="flex items-center gap-2 text-sm text-muted-foreground">

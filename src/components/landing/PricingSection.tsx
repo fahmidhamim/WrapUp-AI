@@ -45,7 +45,7 @@ const plans = [
   },
   {
     name: "Plus",
-    price: "$5",
+    price: "$4.99",
     period: "per user / month",
     desc: "For professionals who need more from every meeting.",
     cta: "Get Started",
@@ -72,7 +72,7 @@ const plans = [
   },
   {
     name: "Business",
-    price: "$20",
+    price: "$11.99",
     period: "per user / month",
     desc: "For growing teams to streamline collaboration.",
     cta: "Get Started",
