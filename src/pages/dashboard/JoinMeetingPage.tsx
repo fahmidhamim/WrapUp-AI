@@ -236,24 +236,11 @@ export default function JoinMeetingPage() {
               padding: 32,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-              <div
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: 6,
-                  background: "#6C3FE6",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "white",
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                W
-              </div>
-              <span style={{ color: "#6C3FE6", fontSize: 14, fontWeight: 600 }}>WrapUp</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+              <span style={{ fontSize: 18 }}>🎙️</span>
+              <span className="gradient-text" style={{ fontSize: 16, fontWeight: 700 }}>
+                WrapUp
+              </span>
             </div>
             <div style={{ fontSize: 18, color: "white", fontWeight: 500 }}>Join a meeting</div>
             <div
@@ -393,66 +380,9 @@ export default function JoinMeetingPage() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 12,
-                margin: "20px 0",
-              }}
-            >
-              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>or</span>
-              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
-            </div>
-
-            <div style={{ display: "flex", gap: 10 }}>
-              {[
-                { letter: "G", bg: "#16A34A", label: "Google Meet" },
-                { letter: "Z", bg: "#2563EB", label: "Zoom" },
-                { letter: "T", bg: "#7C3AED", label: "Teams" },
-              ].map((q) => (
-                <div
-                  key={q.label}
-                  className="jm-quick-btn"
-                  style={{
-                    flex: 1,
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: 10,
-                    padding: "10px 8px",
-                    cursor: "pointer",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 6,
-                    transition: "background 0.15s ease",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      background: q.bg,
-                      color: "white",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    {q.letter}
-                  </div>
-                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>{q.label}</span>
-                </div>
-              ))}
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
                 justifyContent: "center",
                 gap: 4,
-                marginTop: 22,
+                marginTop: 18,
                 fontSize: 12,
                 color: "rgba(255,255,255,0.45)",
               }}

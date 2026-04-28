@@ -376,23 +376,10 @@ export default function LiveMeetingRoomPage() {
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div
-                style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: 5,
-                  background: "#6C3FE6",
-                  color: "white",
-                  fontSize: 11,
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                W
-              </div>
-              <span style={{ color: "#6C3FE6", fontSize: 14, fontWeight: 600 }}>WrapUp</span>
+              <span style={{ fontSize: 18, lineHeight: 1 }}>🎙️</span>
+              <span className="gradient-text" style={{ fontSize: 16, fontWeight: 700 }}>
+                WrapUp
+              </span>
             </div>
             <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.1)" }} />
             <span style={{ fontSize: 14, color: "white", fontWeight: 500 }}>Team Standup</span>
@@ -505,16 +492,27 @@ export default function LiveMeetingRoomPage() {
 
         {/* MAIN */}
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0 }}>
+          {/* LEFT COLUMN: video grid + control bar stacked */}
+          <div
+            style={{
+              flex: "1 1 auto",
+              display: "flex",
+              flexDirection: "column",
+              minWidth: 0,
+              minHeight: 0,
+            }}
+          >
           {/* VIDEO GRID */}
           <div
             ref={gridRef}
             style={{
-              flex: "0 0 65%",
+              flex: 1,
               background: "#080810",
               padding: 16,
               display: "flex",
               flexDirection: "column",
-              gap: 8,
+              justifyContent: "center",
+              gap: 10,
               position: "relative",
               minHeight: 0,
             }}
@@ -540,12 +538,12 @@ export default function LiveMeetingRoomPage() {
             ) : (
               <div
                 style={{
-                  flex: 1,
                   display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gridTemplateRows: "repeat(2, 1fr)",
-                  gap: 8,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                  gridAutoRows: "minmax(0, 1fr)",
+                  gap: 10,
                   minHeight: 0,
+                  alignContent: "center",
                 }}
               >
                 {PARTICIPANTS.map((p) => (
@@ -572,10 +570,272 @@ export default function LiveMeetingRoomPage() {
             ))}
           </div>
 
+          {/* CONTROL BAR — placed inside left column so it spans only the video area */}
+          <div
+            style={{
+              height: 72,
+              background: "#0E0E1A",
+              borderTop: "1px solid rgba(255,255,255,0.08)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 24px",
+              position: "relative",
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, position: "relative" }}>
+              <span style={{ color: "rgba(255,255,255,0.5)" }}>Meeting ID:</span>
+              <span style={{ color: "white", fontFamily: "monospace" }}>{meetingId}</span>
+              <div onClick={handleCopy} style={{ cursor: "pointer", color: "rgba(255,255,255,0.55)", display: "flex", position: "relative" }}>
+                {copied ? <Check size={12} color="#10B981" /> : <Copy size={12} />}
+                {copied && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: "calc(100% + 6px)",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      background: "#1E1E2E",
+                      color: "white",
+                      fontSize: 10,
+                      padding: "3px 8px",
+                      borderRadius: 6,
+                      whiteSpace: "nowrap",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    Copied!
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", position: "relative" }}>
+              <ControlButton
+                icon={muted ? <MicOff size={20} /> : <Mic size={20} />}
+                label={muted ? "Unmute" : "Mute"}
+                danger={muted}
+                onClick={() => setMuted((m) => !m)}
+              />
+              <ControlButton
+                icon={camOff ? <VideoOff size={20} /> : <VideoIcon size={20} />}
+                label={camOff ? "Start video" : "Stop video"}
+                danger={camOff}
+                onClick={() => setCamOff((c) => !c)}
+              />
+              <ControlButton
+                icon={<MonitorUp size={20} />}
+                label="Share screen"
+                active={screenShare}
+                onClick={() => setScreenShare((s) => !s)}
+              />
+
+              <div style={{ position: "relative" }}>
+                <ControlButton
+                  icon={<Smile size={20} />}
+                  label="React"
+                  onClick={() => {
+                    setShowReactions((s) => !s);
+                    setShowMore(false);
+                  }}
+                />
+                {showReactions && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: "calc(100% + 8px)",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      background: "#1E1E2E",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 10,
+                      padding: 8,
+                      display: "flex",
+                      gap: 4,
+                      zIndex: 5,
+                    }}
+                  >
+                    {["👍", "❤️", "😂", "😮", "👏", "🎉"].map((e) => (
+                      <div
+                        key={e}
+                        onClick={() => {
+                          triggerEmoji(e);
+                          setShowReactions(false);
+                        }}
+                        className="mr-popup-item"
+                        style={{
+                          fontSize: 22,
+                          padding: 4,
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          transition: "background 0.15s ease",
+                        }}
+                      >
+                        {e}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ position: "relative" }}>
+                <ControlButton
+                  icon={<MoreHorizontal size={20} />}
+                  label="More"
+                  onClick={() => {
+                    setShowMore((s) => !s);
+                    setShowReactions(false);
+                  }}
+                />
+                {showMore && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: "calc(100% + 8px)",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      background: "#1E1E2E",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 10,
+                      padding: 4,
+                      minWidth: 180,
+                      zIndex: 5,
+                    }}
+                  >
+                    {[
+                      { label: "Blur background", action: () => {} },
+                      { label: "Virtual background", action: () => {} },
+                      {
+                        label: "Full screen",
+                        action: () => document.documentElement.requestFullscreen?.().catch(() => {}),
+                      },
+                      { label: "Keyboard shortcuts", action: () => {} },
+                      { label: "Report a problem", action: () => {} },
+                    ].map((o) => (
+                      <div
+                        key={o.label}
+                        onClick={() => {
+                          o.action();
+                          setShowMore(false);
+                        }}
+                        className="mr-popup-item"
+                        style={{
+                          fontSize: 13,
+                          padding: "8px 12px",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          color: "white",
+                          transition: "background 0.15s ease",
+                        }}
+                      >
+                        {o.label}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <ControlButton
+                icon={<MessageSquare size={20} />}
+                label="Chat"
+                badge={unread ? "3" : undefined}
+                onClick={() => switchTab("chat")}
+              />
+              <ControlButton
+                icon={<Users size={20} />}
+                label="People"
+                onClick={() => switchTab("participants")}
+              />
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 1, position: "relative" }}>
+              <div
+                className="mr-leave-btn"
+                onClick={goLeave}
+                style={{
+                  background: "#EF4444",
+                  borderRadius: "12px 0 0 12px",
+                  padding: "10px 20px",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  transition: "background 0.15s ease",
+                }}
+              >
+                <PhoneOff size={16} />
+                Leave Meeting
+              </div>
+              <div
+                className="mr-leave-arrow"
+                onClick={() => setShowLeaveMenu((s) => !s)}
+                style={{
+                  background: "#EF4444",
+                  borderRadius: "0 12px 12px 0",
+                  padding: "10px 8px",
+                  color: "white",
+                  cursor: "pointer",
+                  borderLeft: "1px solid rgba(255,255,255,0.15)",
+                  display: "flex",
+                  alignItems: "center",
+                  transition: "background 0.15s ease",
+                }}
+              >
+                <ChevronDown size={14} />
+              </div>
+              {showLeaveMenu && (
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: "calc(100% + 8px)",
+                    right: 0,
+                    background: "#1E1E2E",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 10,
+                    padding: 4,
+                    minWidth: 200,
+                    zIndex: 5,
+                  }}
+                >
+                  {[
+                    { label: "Leave meeting" },
+                    { label: "End meeting for all" },
+                  ].map((o) => (
+                    <div
+                      key={o.label}
+                      onClick={() => {
+                        setShowLeaveMenu(false);
+                        goLeave();
+                      }}
+                      className="mr-popup-item"
+                      style={{
+                        fontSize: 13,
+                        padding: "8px 12px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        color: "white",
+                        transition: "background 0.15s ease",
+                      }}
+                    >
+                      {o.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          </div>
+          {/* /LEFT COLUMN */}
+
           {/* RIGHT PANEL */}
           <div
             style={{
-              flex: "1 1 35%",
+              flex: "0 0 320px",
+              width: 320,
               background: "#0E0E1A",
               borderLeft: "1px solid rgba(255,255,255,0.08)",
               display: "flex",
@@ -1013,264 +1273,6 @@ export default function LiveMeetingRoomPage() {
                 />
               )}
             </div>
-          </div>
-        </div>
-
-        {/* CONTROL BAR */}
-        <div
-          style={{
-            height: 72,
-            background: "#0E0E1A",
-            borderTop: "1px solid rgba(255,255,255,0.08)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "0 24px",
-            position: "relative",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, position: "relative" }}>
-            <span style={{ color: "rgba(255,255,255,0.5)" }}>Meeting ID:</span>
-            <span style={{ color: "white", fontFamily: "monospace" }}>{meetingId}</span>
-            <div onClick={handleCopy} style={{ cursor: "pointer", color: "rgba(255,255,255,0.55)", display: "flex", position: "relative" }}>
-              {copied ? <Check size={12} color="#10B981" /> : <Copy size={12} />}
-              {copied && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "calc(100% + 6px)",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    background: "#1E1E2E",
-                    color: "white",
-                    fontSize: 10,
-                    padding: "3px 8px",
-                    borderRadius: 6,
-                    whiteSpace: "nowrap",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  Copied!
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", position: "relative" }}>
-            <ControlButton
-              icon={muted ? <MicOff size={20} /> : <Mic size={20} />}
-              label={muted ? "Unmute" : "Mute"}
-              danger={muted}
-              onClick={() => setMuted((m) => !m)}
-            />
-            <ControlButton
-              icon={camOff ? <VideoOff size={20} /> : <VideoIcon size={20} />}
-              label={camOff ? "Start video" : "Stop video"}
-              danger={camOff}
-              onClick={() => setCamOff((c) => !c)}
-            />
-            <ControlButton
-              icon={<MonitorUp size={20} />}
-              label="Share screen"
-              active={screenShare}
-              onClick={() => setScreenShare((s) => !s)}
-            />
-
-            <div style={{ position: "relative" }}>
-              <ControlButton
-                icon={<Smile size={20} />}
-                label="React"
-                onClick={() => {
-                  setShowReactions((s) => !s);
-                  setShowMore(false);
-                }}
-              />
-              {showReactions && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "calc(100% + 8px)",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    background: "#1E1E2E",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 10,
-                    padding: 8,
-                    display: "flex",
-                    gap: 4,
-                    zIndex: 5,
-                  }}
-                >
-                  {["👍", "❤️", "😂", "😮", "👏", "🎉"].map((e) => (
-                    <div
-                      key={e}
-                      onClick={() => {
-                        triggerEmoji(e);
-                        setShowReactions(false);
-                      }}
-                      className="mr-popup-item"
-                      style={{
-                        fontSize: 22,
-                        padding: 4,
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        transition: "background 0.15s ease",
-                      }}
-                    >
-                      {e}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ position: "relative" }}>
-              <ControlButton
-                icon={<MoreHorizontal size={20} />}
-                label="More"
-                onClick={() => {
-                  setShowMore((s) => !s);
-                  setShowReactions(false);
-                }}
-              />
-              {showMore && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "calc(100% + 8px)",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    background: "#1E1E2E",
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 10,
-                    padding: 4,
-                    minWidth: 180,
-                    zIndex: 5,
-                  }}
-                >
-                  {[
-                    { label: "Blur background", action: () => {} },
-                    { label: "Virtual background", action: () => {} },
-                    {
-                      label: "Full screen",
-                      action: () => document.documentElement.requestFullscreen?.().catch(() => {}),
-                    },
-                    { label: "Keyboard shortcuts", action: () => {} },
-                    { label: "Report a problem", action: () => {} },
-                  ].map((o) => (
-                    <div
-                      key={o.label}
-                      onClick={() => {
-                        o.action();
-                        setShowMore(false);
-                      }}
-                      className="mr-popup-item"
-                      style={{
-                        fontSize: 13,
-                        padding: "8px 12px",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        color: "white",
-                        transition: "background 0.15s ease",
-                      }}
-                    >
-                      {o.label}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <ControlButton
-              icon={<MessageSquare size={20} />}
-              label="Chat"
-              badge={unread ? "3" : undefined}
-              onClick={() => switchTab("chat")}
-            />
-            <ControlButton
-              icon={<Users size={20} />}
-              label="People"
-              onClick={() => switchTab("participants")}
-            />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 1, position: "relative" }}>
-            <div
-              className="mr-leave-btn"
-              onClick={goLeave}
-              style={{
-                background: "#EF4444",
-                borderRadius: "12px 0 0 12px",
-                padding: "10px 20px",
-                fontSize: 14,
-                fontWeight: 500,
-                color: "white",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                transition: "background 0.15s ease",
-              }}
-            >
-              <PhoneOff size={16} />
-              Leave Meeting
-            </div>
-            <div
-              className="mr-leave-arrow"
-              onClick={() => setShowLeaveMenu((s) => !s)}
-              style={{
-                background: "#EF4444",
-                borderRadius: "0 12px 12px 0",
-                padding: "10px 8px",
-                color: "white",
-                cursor: "pointer",
-                borderLeft: "1px solid rgba(255,255,255,0.15)",
-                display: "flex",
-                alignItems: "center",
-                transition: "background 0.15s ease",
-              }}
-            >
-              <ChevronDown size={14} />
-            </div>
-            {showLeaveMenu && (
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: "calc(100% + 8px)",
-                  right: 0,
-                  background: "#1E1E2E",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: 10,
-                  padding: 4,
-                  minWidth: 200,
-                  zIndex: 5,
-                }}
-              >
-                {[
-                  { label: "Leave meeting" },
-                  { label: "End meeting for all" },
-                ].map((o) => (
-                  <div
-                    key={o.label}
-                    onClick={() => {
-                      setShowLeaveMenu(false);
-                      goLeave();
-                    }}
-                    className="mr-popup-item"
-                    style={{
-                      fontSize: 13,
-                      padding: "8px 12px",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      color: "white",
-                      transition: "background 0.15s ease",
-                    }}
-                  >
-                    {o.label}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </div>
