@@ -9,8 +9,8 @@ const corsHeaders = {
 };
 
 const PRICE_MAP: Record<string, string> = {
-  plus: "price_1TLn8lFeOJEhyHTsFEaqKdDn",
-  business: "price_1TLnS7FeOJEhyHTsGZvKhi7r",
+  plus: "price_1TR8LEFeOJEhyHTsQnMg4Kn4",
+  business: "price_1TR8HBFeOJEhyHTs8Dfl3qUd",
 };
 const CHECKOUT_PLAN_TYPES = new Set(["plus", "business"]);
 
