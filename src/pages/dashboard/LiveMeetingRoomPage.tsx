@@ -319,11 +319,27 @@ export default function LiveMeetingRoomPage() {
   const [floaters, setFloaters] = useState<{ id: number; emoji: string; left: number }[]>([]);
   const floaterIdRef = useRef(0);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const popoverRootRef = useRef<HTMLDivElement | null>(null);
+  const leaveRootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!showReactions && !showMore && !showLeaveMenu) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (popoverRootRef.current?.contains(target)) return;
+      if (leaveRootRef.current?.contains(target)) return;
+      setShowReactions(false);
+      setShowMore(false);
+      setShowLeaveMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showReactions, showMore, showLeaveMenu]);
 
   const you = useMemo(() => PARTICIPANTS.find((p) => p.isYou)!, []);
 
@@ -345,7 +361,7 @@ export default function LiveMeetingRoomPage() {
     if (tab === "chat") setUnread(false);
   };
 
-  const goLeave = () => navigate("/dashboard/meetings");
+  const goLeave = () => navigate("/join-meeting");
 
   return (
     <>
@@ -375,12 +391,19 @@ export default function LiveMeetingRoomPage() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 18, lineHeight: 1 }}>🎙️</span>
-              <span className="gradient-text" style={{ fontSize: 16, fontWeight: 700 }}>
-                WrapUp
-              </span>
-            </div>
+            <span
+              onClick={() => navigate("/dashboard")}
+              className="gradient-text"
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                letterSpacing: "-0.01em",
+                cursor: "pointer",
+                lineHeight: 1,
+              }}
+            >
+              WrapUp
+            </span>
             <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.1)" }} />
             <span style={{ fontSize: 14, color: "white", fontWeight: 500 }}>Team Standup</span>
             <div
@@ -539,11 +562,10 @@ export default function LiveMeetingRoomPage() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                  gridAutoRows: "minmax(0, 1fr)",
-                  gap: 10,
-                  minHeight: 0,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: 12,
                   alignContent: "center",
+                  width: "100%",
                 }}
               >
                 {PARTICIPANTS.map((p) => (
@@ -611,7 +633,7 @@ export default function LiveMeetingRoomPage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", position: "relative" }}>
+            <div ref={popoverRootRef} style={{ display: "flex", gap: 8, alignItems: "flex-start", position: "relative" }}>
               <ControlButton
                 icon={muted ? <MicOff size={20} /> : <Mic size={20} />}
                 label={muted ? "Unmute" : "Mute"}
@@ -749,7 +771,7 @@ export default function LiveMeetingRoomPage() {
               />
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 1, position: "relative" }}>
+            <div ref={leaveRootRef} style={{ display: "flex", alignItems: "center", gap: 1, position: "relative" }}>
               <div
                 className="mr-leave-btn"
                 onClick={goLeave}
@@ -834,8 +856,8 @@ export default function LiveMeetingRoomPage() {
           {/* RIGHT PANEL */}
           <div
             style={{
-              flex: "0 0 320px",
-              width: 320,
+              flex: "1 1 35%",
+              maxWidth: "35%",
               background: "#0E0E1A",
               borderLeft: "1px solid rgba(255,255,255,0.08)",
               display: "flex",
