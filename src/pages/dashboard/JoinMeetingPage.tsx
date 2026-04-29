@@ -64,7 +64,7 @@ function MeetingIllustration() {
     { color: "#0D9488", initials: "SA" },
   ];
   return (
-    <div style={{ position: "relative", width: "100%", padding: "20px 0" }}>
+    <div style={{ position: "relative", width: "100%", minHeight: 260, minWidth: 340, padding: "8px 0" }}>
       <div
         style={{
           position: "absolute",
@@ -80,8 +80,8 @@ function MeetingIllustration() {
           position: "relative",
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
-          gap: 12,
-          maxWidth: 320,
+          gap: 14,
+          maxWidth: 380,
           margin: "0 auto",
         }}
       >
@@ -92,19 +92,21 @@ function MeetingIllustration() {
               gridColumn: i === 2 ? "1 / span 2" : undefined,
               background: "#141828",
               border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 12,
-              aspectRatio: i === 2 ? "2.2 / 1" : "1.4 / 1",
+              borderRadius: 14,
+              minHeight: 110,
+              minWidth: 140,
+              aspectRatio: i === 2 ? "2.4 / 1" : "1.4 / 1",
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 8,
+              gap: 10,
             }}
           >
             <div
               style={{
-                width: 44,
-                height: 44,
+                width: 52,
+                height: 52,
                 borderRadius: "50%",
                 background: t.color,
                 display: "flex",
@@ -206,9 +208,19 @@ export default function JoinMeetingPage() {
             alignItems: "center",
           }}
         >
-          <div style={{ textAlign: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              height: "100%",
+              textAlign: "center",
+              gap: 18,
+            }}
+          >
             <MeetingIllustration />
-            <div style={{ marginTop: 24 }}>
+            <div>
               <div style={{ fontSize: 20, color: "white", fontWeight: 600 }}>
                 Join your team in real time
               </div>
@@ -380,9 +392,22 @@ export default function JoinMeetingPage() {
               style={{
                 display: "flex",
                 alignItems: "center",
+                gap: 12,
+                margin: "16px 0",
+              }}
+            >
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>or</span>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
                 justifyContent: "center",
                 gap: 4,
-                marginTop: 18,
+                marginTop: 4,
                 fontSize: 12,
                 color: "rgba(255,255,255,0.45)",
               }}

@@ -7,8 +7,8 @@ import { signOut } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/common/NavLink";
 import {
-  LayoutDashboard, Video, PhoneCall, BarChart3,
-  Calendar, Settings, LogOut, Plus, Moon, Sun, Menu, Clock, Bell,
+  LayoutDashboard, Video, PhoneCall,
+  Calendar, Settings, LogOut, Plus, Moon, Sun, Menu, Clock, Bell, Upload, Zap,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -19,17 +19,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { isTierAtLeast, type SubscriptionTier } from "@/lib/subscription";
+// subscription gating intentionally not used in sidebar — all 8 items are always visible
 
 const sidebarLinks = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { label: "Meetings", to: "/dashboard/meetings", icon: Video },
-  { label: "New Meeting", to: "/dashboard/new-meeting", icon: Plus },
+  { label: "Upload", to: "/dashboard/upload", icon: Upload },
+  { label: "Instant Meeting", to: "/dashboard/instant", icon: Zap },
   { label: "Schedule", to: "/dashboard/schedule", icon: Calendar },
   { label: "Upcoming Meetings", to: "/dashboard/upcoming", icon: Clock },
   { label: "Join Meeting", to: "/join-meeting", icon: PhoneCall },
-  { label: "Analytics", to: "/dashboard/analytics", icon: BarChart3, minimumTier: "business" as SubscriptionTier },
-  { label: "Calendar", to: "/dashboard/calendar", icon: Calendar, minimumTier: "business" as SubscriptionTier },
   { label: "Settings", to: "/dashboard/settings", icon: Settings },
 ];
 
@@ -61,6 +60,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [dark, setDark] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const pageTitle = getPageTitle(location.pathname);
   const isDashboardHome = location.pathname === "/dashboard";
   const showNewMeetingBtn = location.pathname === "/dashboard";
@@ -83,10 +83,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   if (!user) return null;
 
-  const visibleLinks = sidebarLinks.filter((link) => {
-    if (!link.minimumTier) return true;
-    return isTierAtLeast(tier, link.minimumTier);
-  });
+  const visibleLinks = sidebarLinks;
 
   const handleLogout = async () => {
     await signOut();
@@ -128,8 +125,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-sidebar-accent transition-colors"
           >
             <div className="w-9 h-9 rounded-full overflow-hidden gradient-bg flex items-center justify-center shrink-0">
-              {profile?.avatar_url ? (
-                <img src={profile.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+              {profile?.avatar_url && !avatarFailed ? (
+                <img
+                  src={profile.avatar_url}
+                  alt=""
+                  onError={() => setAvatarFailed(true)}
+                  className="w-full h-full object-cover"
+                />
               ) : (
                 <span className="text-xs font-bold text-primary-foreground">
                   {(profile?.full_name || user?.email || "U").slice(0, 2).toUpperCase()}

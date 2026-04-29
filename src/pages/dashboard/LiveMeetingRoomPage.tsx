@@ -121,7 +121,7 @@ function VideoTile({ p, isScreenShareSmall }: { p: Participant; isScreenShareSma
       style={{
         background: "#141828",
         borderRadius: 12,
-        aspectRatio: "16 / 9",
+        ...(isScreenShareSmall ? { aspectRatio: "16 / 9" } : { width: "100%", height: "100%", minHeight: 0 }),
         position: "relative",
         overflow: "hidden",
         border: "2px solid transparent",
@@ -253,7 +253,7 @@ function ControlButton({
     : "#1E1E2E";
   return (
     <div
-      style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, position: "relative" }}
+      style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0, position: "relative" }}
     >
       <div
         className="mr-ctrl-btn"
@@ -297,7 +297,17 @@ function ControlButton({
           </div>
         )}
       </div>
-      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.55)" }}>{label}</span>
+      <span
+        style={{
+          fontSize: 11,
+          color: "rgba(255,255,255,0.65)",
+          marginTop: 4,
+          whiteSpace: "nowrap",
+          textAlign: "center",
+        }}
+      >
+        {label}
+      </span>
     </div>
   );
 }
@@ -530,11 +540,10 @@ export default function LiveMeetingRoomPage() {
             style={{
               flex: 1,
               background: "#080810",
-              padding: 16,
+              padding: 12,
               display: "flex",
               flexDirection: "column",
-              justifyContent: "center",
-              gap: 10,
+              gap: 8,
               position: "relative",
               minHeight: 0,
             }}
@@ -561,10 +570,13 @@ export default function LiveMeetingRoomPage() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                  gap: 12,
-                  alignContent: "center",
+                  gridTemplateColumns: "repeat(3, 1fr)",
+                  gridTemplateRows: "repeat(2, 1fr)",
+                  gap: 8,
+                  alignContent: "stretch",
                   width: "100%",
+                  height: "100%",
+                  minHeight: 0,
                 }}
               >
                 {PARTICIPANTS.map((p) => (
@@ -770,7 +782,7 @@ export default function LiveMeetingRoomPage() {
               />
             </div>
 
-            <div ref={leaveRootRef} style={{ display: "flex", alignItems: "center", gap: 1, position: "relative" }}>
+            <div ref={leaveRootRef} style={{ display: "flex", alignItems: "stretch", gap: 0, position: "relative" }}>
               <div
                 className="mr-leave-btn"
                 onClick={goLeave}
@@ -797,12 +809,13 @@ export default function LiveMeetingRoomPage() {
                 style={{
                   background: "#EF4444",
                   borderRadius: "0 12px 12px 0",
-                  padding: "10px 8px",
+                  width: 36,
                   color: "white",
                   cursor: "pointer",
-                  borderLeft: "1px solid rgba(255,255,255,0.15)",
+                  borderLeft: "1px solid rgba(255,255,255,0.2)",
                   display: "flex",
                   alignItems: "center",
+                  justifyContent: "center",
                   transition: "background 0.15s ease",
                 }}
               >
@@ -868,6 +881,10 @@ export default function LiveMeetingRoomPage() {
               style={{
                 display: "flex",
                 borderBottom: "1px solid rgba(255,255,255,0.08)",
+                position: "sticky",
+                top: 0,
+                background: "#0E0E1A",
+                zIndex: 10,
               }}
             >
               {(
@@ -888,8 +905,8 @@ export default function LiveMeetingRoomPage() {
                     style={{
                       flex: 1,
                       textAlign: "center",
-                      padding: "12px 4px",
-                      fontSize: 12,
+                      padding: "14px 4px",
+                      fontSize: 13,
                       cursor: "pointer",
                       color: active ? "white" : "rgba(255,255,255,0.5)",
                       borderBottom: active ? "2px solid #6C3FE6" : "2px solid transparent",
