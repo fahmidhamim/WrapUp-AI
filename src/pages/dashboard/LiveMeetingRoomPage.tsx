@@ -46,7 +46,55 @@ const styles = `
 .mr-ctrl-btn { transition: all 0.15s ease; }
 .mr-ctrl-btn:hover { transform: scale(1.05); filter: brightness(1.2); }
 .mr-tile:hover { filter: brightness(1.08); }
-.mr-tab:hover { color: rgba(255,255,255,0.85) !important; }
+.mr-tab-row {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+  padding: 10px 10px 0 10px;
+  background: linear-gradient(180deg, rgba(14,14,26,0.85) 0%, rgba(14,14,26,0.65) 100%);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.mr-tab-row::after {
+  content: "";
+  position: absolute; left: 0; right: 0; bottom: -8px; height: 8px;
+  background: linear-gradient(180deg, rgba(14,14,26,0.6), transparent);
+  pointer-events: none;
+}
+.mr-tab-pill {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  padding: 9px 6px 11px 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  color: rgba(255,255,255,0.55);
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px 10px 0 0;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  position: relative;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mr-tab-pill:hover { transform: translateY(-1px); }
+.mr-tab-pill[data-color="purple"]:hover { color: #C4B5FD; background: rgba(167,139,250,0.12); border-color: rgba(167,139,250,0.28); box-shadow: 0 4px 14px -6px rgba(167,139,250,0.45); }
+.mr-tab-pill[data-color="blue"]:hover   { color: #93C5FD; background: rgba(96,165,250,0.12);  border-color: rgba(96,165,250,0.28);  box-shadow: 0 4px 14px -6px rgba(96,165,250,0.45); }
+.mr-tab-pill[data-color="teal"]:hover   { color: #5EEAD4; background: rgba(45,212,191,0.12);  border-color: rgba(45,212,191,0.28);  box-shadow: 0 4px 14px -6px rgba(45,212,191,0.45); }
+.mr-tab-pill[data-color="pink"]:hover   { color: #F9A8D4; background: rgba(244,114,182,0.12); border-color: rgba(244,114,182,0.28); box-shadow: 0 4px 14px -6px rgba(244,114,182,0.45); }
+.mr-tab-pill[data-color="amber"]:hover  { color: #FCD34D; background: rgba(251,191,36,0.12);  border-color: rgba(251,191,36,0.28);  box-shadow: 0 4px 14px -6px rgba(251,191,36,0.45); }
+.mr-tab-pill.is-active[data-color="purple"] { color: #DDD6FE; background: linear-gradient(180deg, rgba(167,139,250,0.22), rgba(167,139,250,0.10)); border-color: rgba(167,139,250,0.45); box-shadow: 0 6px 20px -8px rgba(167,139,250,0.55), inset 0 0 0 1px rgba(167,139,250,0.18); }
+.mr-tab-pill.is-active[data-color="blue"]   { color: #BFDBFE; background: linear-gradient(180deg, rgba(96,165,250,0.22), rgba(96,165,250,0.10));   border-color: rgba(96,165,250,0.45);   box-shadow: 0 6px 20px -8px rgba(96,165,250,0.55), inset 0 0 0 1px rgba(96,165,250,0.18); }
+.mr-tab-pill.is-active[data-color="teal"]   { color: #99F6E4; background: linear-gradient(180deg, rgba(45,212,191,0.22), rgba(45,212,191,0.10));   border-color: rgba(45,212,191,0.45);   box-shadow: 0 6px 20px -8px rgba(45,212,191,0.55), inset 0 0 0 1px rgba(45,212,191,0.18); }
+.mr-tab-pill.is-active[data-color="pink"]   { color: #FBCFE8; background: linear-gradient(180deg, rgba(244,114,182,0.22), rgba(244,114,182,0.10)); border-color: rgba(244,114,182,0.45); box-shadow: 0 6px 20px -8px rgba(244,114,182,0.55), inset 0 0 0 1px rgba(244,114,182,0.18); }
+.mr-tab-pill.is-active[data-color="amber"]  { color: #FDE68A; background: linear-gradient(180deg, rgba(251,191,36,0.22), rgba(251,191,36,0.10));   border-color: rgba(251,191,36,0.45);   box-shadow: 0 6px 20px -8px rgba(251,191,36,0.55), inset 0 0 0 1px rgba(251,191,36,0.18); }
 .mr-popup-item:hover { background: rgba(255,255,255,0.06) !important; }
 .mr-leave-btn:hover { background: #dc2626 !important; }
 .mr-leave-arrow:hover { background: #dc2626 !important; }
@@ -877,41 +925,23 @@ export default function LiveMeetingRoomPage() {
               minWidth: 0,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                borderBottom: "1px solid rgba(255,255,255,0.08)",
-                position: "sticky",
-                top: 0,
-                background: "#0E0E1A",
-                zIndex: 10,
-              }}
-            >
+            <div className="mr-tab-row">
               {(
                 [
-                  { k: "participants", label: "Participants" },
-                  { k: "chat", label: "Chat" },
-                  { k: "transcript", label: "Transcript" },
-                  { k: "ai", label: "AI Summary" },
-                  { k: "notes", label: "Notes" },
-                ] as { k: TabKey; label: string }[]
+                  { k: "participants", label: "Participants", color: "purple" },
+                  { k: "chat", label: "Chat", color: "blue" },
+                  { k: "transcript", label: "Transcript", color: "teal" },
+                  { k: "ai", label: "AI Summary", color: "pink" },
+                  { k: "notes", label: "Notes", color: "amber" },
+                ] as { k: TabKey; label: string; color: string }[]
               ).map((t) => {
                 const active = activeTab === t.k;
                 return (
                   <div
                     key={t.k}
-                    className="mr-tab"
+                    data-color={t.color}
+                    className={`mr-tab-pill${active ? " is-active" : ""}`}
                     onClick={() => switchTab(t.k)}
-                    style={{
-                      flex: 1,
-                      textAlign: "center",
-                      padding: "14px 4px",
-                      fontSize: 13,
-                      cursor: "pointer",
-                      color: active ? "white" : "rgba(255,255,255,0.5)",
-                      borderBottom: active ? "2px solid #6C3FE6" : "2px solid transparent",
-                      transition: "color 0.15s ease",
-                    }}
                   >
                     {t.label}
                   </div>
