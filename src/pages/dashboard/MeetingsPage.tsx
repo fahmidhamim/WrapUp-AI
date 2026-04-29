@@ -430,34 +430,25 @@ export default function MeetingsPage() {
 
       <div className="flex items-center justify-between gap-2">
         <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
-          <TabsList className="bg-transparent border-b border-border/40 rounded-none p-0 justify-start gap-1 h-auto">
+          <TabsList className="glass-tab-row">
             {(
               [
-                { key: "all", label: "All", count: tabCounts.all },
-                { key: "mine", label: "Created by me", count: tabCounts.mine },
-                { key: "recorded", label: "Recorded", count: tabCounts.recorded },
-                { key: "uploaded", label: "Uploaded", count: tabCounts.uploaded },
-                { key: "live", label: "Live", count: tabCounts.live },
-                { key: "shared", label: "Shared", count: tabCounts.shared },
+                { key: "all", label: "All", count: tabCounts.all, color: "purple" },
+                { key: "mine", label: "Created by me", count: tabCounts.mine, color: "blue" },
+                { key: "recorded", label: "Recorded", count: tabCounts.recorded, color: "teal" },
+                { key: "uploaded", label: "Uploaded", count: tabCounts.uploaded, color: "amber" },
+                { key: "live", label: "Live", count: tabCounts.live, color: "pink" },
+                { key: "shared", label: "Shared", count: tabCounts.shared, color: "green" },
               ] as const
             ).map((t) => (
               <TabsTrigger
                 key={t.key}
                 value={t.key}
-                className={cn(
-                  "rounded-none border-b-2 border-transparent bg-transparent px-3 py-2 text-sm font-medium text-muted-foreground",
-                  "data-[state=active]:border-primary data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:bg-transparent",
-                )}
+                data-color={t.color}
+                className="glass-tab"
               >
                 {t.label}
-                <span
-                  className={cn(
-                    "ml-2 inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                    tab === t.key ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {t.count}
-                </span>
+                <span className="glass-tab-count">{t.count}</span>
               </TabsTrigger>
             ))}
           </TabsList>

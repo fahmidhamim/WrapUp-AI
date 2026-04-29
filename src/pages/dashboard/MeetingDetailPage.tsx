@@ -947,14 +947,14 @@ export default function MeetingDetailPage() {
       </Dialog>
 
       <Tabs defaultValue="transcript" className="w-full">
-        <TabsList className="w-full justify-start overflow-x-auto">
-          <TabsTrigger value="transcript"><FileText className="h-3.5 w-3.5 mr-1" /> Transcript</TabsTrigger>
-          <TabsTrigger value="summary"><ListTodo className="h-3.5 w-3.5 mr-1" /> Summary</TabsTrigger>
-          <TabsTrigger value="actions"><ListTodo className="h-3.5 w-3.5 mr-1" /> Actions</TabsTrigger>
-          <TabsTrigger value="analytics"><BarChart3 className="h-3.5 w-3.5 mr-1" /> Analytics</TabsTrigger>
-          <TabsTrigger value="ask-ai"><Bot className="h-3.5 w-3.5 mr-1" /> Ask AI</TabsTrigger>
-          <TabsTrigger value="notes"><StickyNote className="h-3.5 w-3.5 mr-1" /> Notes</TabsTrigger>
-          <TabsTrigger value="participants"><Users className="h-3.5 w-3.5 mr-1" /> Participants</TabsTrigger>
+        <TabsList className="glass-tab-row w-full overflow-x-auto">
+          <TabsTrigger value="transcript" data-color="purple" className="glass-tab"><FileText className="h-3.5 w-3.5 mr-1" /> Transcript</TabsTrigger>
+          <TabsTrigger value="summary" data-color="pink" className="glass-tab"><ListTodo className="h-3.5 w-3.5 mr-1" /> Summary</TabsTrigger>
+          <TabsTrigger value="actions" data-color="amber" className="glass-tab"><ListTodo className="h-3.5 w-3.5 mr-1" /> Actions</TabsTrigger>
+          <TabsTrigger value="analytics" data-color="blue" className="glass-tab"><BarChart3 className="h-3.5 w-3.5 mr-1" /> Analytics</TabsTrigger>
+          <TabsTrigger value="ask-ai" data-color="teal" className="glass-tab"><Bot className="h-3.5 w-3.5 mr-1" /> Ask AI</TabsTrigger>
+          <TabsTrigger value="notes" data-color="green" className="glass-tab"><StickyNote className="h-3.5 w-3.5 mr-1" /> Notes</TabsTrigger>
+          <TabsTrigger value="participants" data-color="slate" className="glass-tab"><Users className="h-3.5 w-3.5 mr-1" /> Participants</TabsTrigger>
         </TabsList>
 
         <TabsContent value="transcript" className="mt-4">
