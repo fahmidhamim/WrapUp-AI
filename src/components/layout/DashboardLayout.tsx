@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/common/NavLink";
 import {
   LayoutDashboard, Video, PhoneCall,
-  Calendar, Settings, LogOut, Plus, Moon, Sun, Menu, Clock, Bell, Upload, Zap,
+  Calendar, Settings, LogOut, Plus, Moon, Sun, Menu, Clock, Bell,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -24,8 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 const sidebarLinks = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { label: "Meetings", to: "/dashboard/meetings", icon: Video },
-  { label: "Upload", to: "/dashboard/upload", icon: Upload },
-  { label: "Instant Meeting", to: "/dashboard/instant", icon: Zap },
+  { label: "New Meeting", to: "/dashboard/new-meeting", icon: Plus },
   { label: "Schedule", to: "/dashboard/schedule", icon: Calendar },
   { label: "Upcoming Meetings", to: "/dashboard/upcoming", icon: Clock },
   { label: "Join Meeting", to: "/join-meeting", icon: PhoneCall },
