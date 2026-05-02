@@ -54,3 +54,11 @@ backend/data/faiss/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Allow Flutter Android Gradle wrapper files
+!mobile/android/gradlew
+!mobile/android/gradlew.bat
+!mobile/android/gradle/
+!mobile/android/gradle/wrapper/
+!mobile/android/gradle/wrapper/gradle-wrapper.jar
+!mobile/android/gradle/wrapper/gradle-wrapper.properties
